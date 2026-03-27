@@ -1,4 +1,4 @@
-# Conduit
+# Conduit-ETL
 
 **Open-source, local-first ELT workbench for data engineers.**
 
