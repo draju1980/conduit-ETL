@@ -1,0 +1,320 @@
+# ============================================================
+# Conduit — Pipeline Configuration Template
+# ============================================================
+# This file defines a complete ELT pipeline with all supported
+# connectors and configuration options.
+#
+# Run with:  conduit run pipeline.yaml
+# Dry run:   conduit run pipeline.yaml --dry-run
+# ============================================================
+
+
+# --- Pipeline Metadata ---
+pipeline:
+  name: orders_to_warehouse
+  version: "1.0.0"
+  description: Enrich orders with customer and region data, load to warehouse
+  schedule: "0 */6 * * *"        # cron expression — null or omit for manual only
+  tags: [orders, analytics, production]
+
+
+# --- Sources (Extract) ---
+# Each source becomes a virtual table in the transform step.
+# Credentials are resolved from the Conduit Vault at runtime.
+sources:
+
+  # -- Postgres --
+  - name: orders
+    type: postgres
+    connection: my-pg-conn       # vault reference — never inline credentials
+    config:
+      schema: public
+      table: orders
+      # query: "SELECT * FROM orders WHERE status != 'draft'"  # alternative to table
+    incremental:
+      enabled: true
+      strategy: timestamp        # timestamp | id
+      watermark_column: updated_at
+    time_machine:
+      schema_lock:
+        enabled: true
+        on_violation: block      # block | warn
+        track:                   # what schema changes to monitor
+          - columns              # added / removed / renamed columns
+          - types                # type changes (INT -> VARCHAR)
+          - nullability          # NOT NULL <-> NULL flips
+
+  # -- MySQL --
+  - name: customers
+    type: mysql
+    connection: my-mysql-conn
+    config:
+      database: app_db
+      table: customers
+      # query: "SELECT * FROM customers WHERE active = 1"
+    incremental:
+      enabled: true
+      strategy: id
+      watermark_column: customer_id
+    time_machine:
+      schema_lock:
+        enabled: true
+        on_violation: warn       # warn only — this source changes often
+
+  # -- MongoDB --
+  - name: events
+    type: mongodb
+    connection: my-mongo-conn
+    config:
+      database: analytics
+      collection: events
+      filter: '{"type": "purchase"}'
+
+  # -- CSV --
+  - name: regions
+    type: csv
+    config:
+      path: ./data/regions.csv
+      delimiter: ","
+      has_header: true
+      encoding: utf-8
+
+  # -- TSV --
+  - name: product_catalog
+    type: tsv
+    config:
+      path: ./data/products.tsv
+      has_header: true
+
+  # -- Excel --
+  - name: budget
+    type: excel
+    config:
+      path: ./data/budget_2026.xlsx
+      sheet: Q1
+      range: A1:F500
+      has_header: true
+
+  # -- S3 --
+  - name: clickstream
+    type: s3
+    connection: my-aws-conn
+    config:
+      bucket: data-lake-raw
+      prefix: clickstream/2026/
+      format: parquet             # csv | parquet | json
+      region: us-east-1
+    incremental:
+      enabled: true
+      strategy: timestamp
+      watermark_column: event_time
+
+
+# --- Transform (DuckDB SQL) ---
+# All sources above are registered as virtual tables.
+# Full SQL supported: JOINs, CTEs, aggregations, window functions.
+transform:
+  engine: duckdb
+  sql: |
+    WITH enriched_orders AS (
+      SELECT
+        o.order_id,
+        o.customer_id,
+        o.amount,
+        o.updated_at,
+        c.name     AS customer_name,
+        c.segment  AS customer_segment,
+        r.region   AS customer_region
+      FROM orders o
+      JOIN customers c ON o.customer_id = c.customer_id
+      JOIN regions r   ON c.region_id   = r.id
+      WHERE o.status = 'completed'
+    )
+    SELECT
+      *,
+      SUM(amount) OVER (
+        PARTITION BY customer_segment
+        ORDER BY updated_at
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+      ) AS running_segment_total,
+      ROW_NUMBER() OVER (
+        PARTITION BY customer_id
+        ORDER BY updated_at DESC
+      ) AS order_recency_rank
+    FROM enriched_orders
+
+
+# --- Validation ---
+# Checks run against the transform output before loading.
+# on_failure: fail (abort pipeline) | warn (log and continue)
+validation:
+
+  - type: schema
+    columns:
+      - { name: order_id,        type: INTEGER }
+      - { name: customer_id,     type: INTEGER }
+      - { name: amount,          type: DECIMAL }
+      - { name: customer_name,   type: VARCHAR }
+      - { name: customer_region, type: VARCHAR }
+    on_failure: fail
+
+  - type: null_check
+    columns: [order_id, customer_id, amount]
+    on_failure: fail
+
+  - type: row_count
+    min: 1
+    max: 10000000
+    on_failure: warn
+
+  - type: custom
+    sql: |
+      SELECT * FROM __result__
+      WHERE amount < 0
+    on_failure: fail              # negative amounts are invalid
+
+
+# --- Destinations (Load) ---
+# Multiple destinations supported — fan-out from a single transform.
+# mode: full_refresh (truncate + insert) | incremental (merge or append)
+destinations:
+
+  # -- Snowflake (incremental merge / upsert) --
+  - name: snowflake_analytics
+    type: snowflake
+    connection: my-sf-conn
+    mode: incremental
+    batch_size: 5000
+    config:
+      database: ANALYTICS
+      schema: PUBLIC
+      table: ENRICHED_ORDERS
+      warehouse: COMPUTE_WH
+      role: LOADER_ROLE
+    incremental:
+      merge_key: [order_id]
+      strategy: merge             # merge (upsert) | append
+    time_machine:
+      schema_lock:
+        enabled: true
+        on_violation: block      # block — destination schema must match exactly
+        track: [columns, types, nullability]
+
+  # -- BigQuery (incremental append) --
+  - name: bigquery_warehouse
+    type: bigquery
+    connection: my-bq-conn
+    mode: incremental
+    batch_size: 10000
+    config:
+      project: my-gcp-project
+      dataset: warehouse
+      table: enriched_orders
+    incremental:
+      strategy: append
+
+  # -- Postgres (full refresh) --
+  - name: pg_reporting
+    type: postgres
+    connection: my-pg-dest-conn
+    mode: full_refresh
+    batch_size: 5000
+    config:
+      schema: reporting
+      table: enriched_orders
+
+  # -- MySQL (full refresh) --
+  - name: mysql_reporting
+    type: mysql
+    connection: my-mysql-dest-conn
+    mode: full_refresh
+    batch_size: 5000
+    config:
+      database: reporting
+      table: enriched_orders
+
+  # -- CSV export --
+  - name: csv_backup
+    type: csv
+    mode: full_refresh
+    config:
+      path: ./output/enriched_orders.csv
+      delimiter: ","
+      include_header: true
+
+  # -- S3 export (parquet, compressed) --
+  - name: s3_archive
+    type: s3
+    connection: my-aws-conn
+    mode: incremental
+    config:
+      bucket: data-lake-processed
+      prefix: enriched_orders/
+      format: parquet              # csv | parquet
+      region: us-east-1
+      compression: snappy          # none | gzip | snappy
+    incremental:
+      strategy: append
+
+
+# --- Time Machine (Pipeline-Level) ---
+# Config versioning: tracks pipeline.yaml changes across runs.
+# Schema locks are configured per-source and per-destination above.
+time_machine:
+  config_lock:
+    enabled: true
+    on_violation: warn             # block | warn — warn lets the run proceed
+  history:
+    retain: 30                     # days to keep config snapshots
+    path: .conduit/history/        # snapshot storage directory
+
+
+# --- Runtime — Disk Check, Chunking & Checkpoints ---
+# Controls how Conduit manages local resources and fault tolerance.
+runtime:
+
+  # Pre-flight disk space check — prevents mid-pipeline failures
+  disk_check:
+    enabled: true
+    min_free_gb: 5                   # minimum free disk space to start
+    safety_buffer_pct: 20            # extra headroom as % of estimated need
+    on_failure: block                # block | warn
+
+  # Chunk-based streaming — bounded memory and disk usage
+  chunking:
+    extract_chunk_size: 10000        # rows per extract batch from source
+    load_batch_size: 5000            # rows per write batch to destination
+    max_memory_mb: 512               # memory ceiling — spills to disk beyond this
+    spill_to_disk: true              # allow DuckDB temp files for large transforms
+
+  # Checkpoint & resume — pick up where you left off after failures
+  checkpoint:
+    enabled: true
+    auto_resume: true                # auto-resume on next run if checkpoint exists
+    retention: 7                     # days to keep completed checkpoints
+    path: .conduit/checkpoints/      # checkpoint storage directory
+
+
+# --- Error Handling ---
+error_handling:
+  max_retries: 3
+  retry_delay_seconds: 30
+  retry_backoff: exponential      # linear | exponential
+  on_failure: abort               # abort | skip_batch | dead_letter
+  dead_letter_path: ./errors/failed_rows.json
+
+
+# --- Notifications & Logging ---
+notifications:
+  log_level: info                 # debug | info | warn | error
+  log_file: ./logs/pipeline.log   # null or omit for stdout only
+  on_success:
+    - type: slack
+      connection: my-slack-token
+      channel: "#data-eng"
+  on_failure:
+    - type: slack
+      connection: my-slack-token
+      channel: "#data-eng-alerts"
+    - type: webhook
+      url: https://hooks.example.com/pipeline-failure

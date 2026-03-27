@@ -1,0 +1,61 @@
+pipeline:
+  name: orders_to_snowflake
+  description: Basic orders pipeline
+
+sources:
+  - name: orders
+    type: postgres
+    connection: my-pg-conn
+    config:
+      schema: public
+      table: orders
+    incremental:
+      enabled: true
+      strategy: timestamp
+      watermark_column: updated_at
+    time_machine:
+      schema_lock:
+        enabled: true
+        on_violation: block
+
+  - name: regions
+    type: csv
+    config:
+      path: ./data/regions.csv
+
+transform:
+  sql: |
+    SELECT o.*, r.region
+    FROM orders o
+    JOIN regions r ON o.region_id = r.id
+    WHERE o.status = 'active'
+
+runtime:
+  disk_check:
+    enabled: true
+    min_free_gb: 2
+    on_failure: block
+  chunking:
+    extract_chunk_size: 10000
+    load_batch_size: 5000
+  checkpoint:
+    enabled: true
+    auto_resume: true
+
+destinations:
+  - name: warehouse
+    type: snowflake
+    connection: my-sf-conn
+    mode: incremental
+    config:
+      database: ANALYTICS
+      schema: PUBLIC
+      table: ORDERS
+      warehouse: COMPUTE_WH
+    incremental:
+      merge_key: [order_id]
+      strategy: merge
+    time_machine:
+      schema_lock:
+        enabled: true
+        on_violation: warn
