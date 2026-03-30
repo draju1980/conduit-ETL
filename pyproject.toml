@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "conduit-etl"
+version = "0.1.0"
+description = "Local-first ELT workbench for data engineers"
+requires-python = ">=3.10"
+dependencies = [
+    "typer>=0.9",
+    "pyyaml>=6.0",
+    "duckdb>=1.0",
+    "pyarrow>=15.0",
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov",
+]
+build = [
+    "pyinstaller>=6.0",
+]
+
+[project.scripts]
+conduit = "conduit.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/conduit"]

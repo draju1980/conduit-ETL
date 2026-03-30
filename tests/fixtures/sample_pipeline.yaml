@@ -1,0 +1,57 @@
+pipeline:
+  name: test_orders
+
+sources:
+  - name: orders
+    type: csv
+    config:
+      path: orders.csv
+
+  - name: regions
+    type: csv
+    config:
+      path: regions.csv
+
+transform:
+  sql: |
+    SELECT
+      o.order_id,
+      o.customer_id,
+      o.amount,
+      o.status,
+      r.region
+    FROM orders o
+    JOIN regions r ON o.region_id = r.id
+    WHERE o.status = 'active'
+
+validation:
+  - type: schema
+    columns:
+      - { name: order_id, type: INTEGER }
+      - { name: customer_id, type: INTEGER }
+      - { name: amount, type: DECIMAL }
+      - { name: status, type: VARCHAR }
+      - { name: region, type: VARCHAR }
+    on_failure: fail
+
+  - type: null_check
+    columns: [order_id, customer_id, amount]
+    on_failure: fail
+
+  - type: row_count
+    min: 1
+    max: 10000000
+    on_failure: warn
+
+  - type: custom
+    sql: |
+      SELECT * FROM __result__
+      WHERE amount < 0
+    on_failure: fail
+
+destinations:
+  - name: output
+    type: csv
+    mode: full_refresh
+    config:
+      path: output/test_output.csv
