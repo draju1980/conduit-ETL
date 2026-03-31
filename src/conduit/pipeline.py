@@ -8,7 +8,15 @@ from pathlib import Path
 from conduit.config import load_pipeline
 from conduit.engine.extract import extract_sources
 from conduit.engine.transform import run_transform
+from conduit.loader.bigquery_loader import load_bigquery
 from conduit.loader.csv_loader import load_csv
+from conduit.loader.json_loader import load_json
+from conduit.loader.mongodb_loader import load_mongodb
+from conduit.loader.mysql_loader import load_mysql
+from conduit.loader.parquet_loader import load_parquet
+from conduit.loader.postgres_loader import load_postgres
+from conduit.loader.s3_loader import load_s3
+from conduit.loader.snowflake_loader import load_snowflake
 from conduit.validation.reporter import log_findings, save_report
 from conduit.validation.runner import run_validation
 
@@ -17,6 +25,15 @@ logger = logging.getLogger(__name__)
 # Loader dispatch by destination type
 _LOADERS = {
     "csv": load_csv,
+    "json": load_json,
+    "jsonl": load_json,
+    "parquet": load_parquet,
+    "postgres": load_postgres,
+    "mysql": load_mysql,
+    "snowflake": load_snowflake,
+    "bigquery": load_bigquery,
+    "mongodb": load_mongodb,
+    "s3": load_s3,
 }
 
 

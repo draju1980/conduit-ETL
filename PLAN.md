@@ -70,7 +70,7 @@ Before writing to the destination, Conduit runs the data quality validation pass
 
 The connector writes to the destination in batches. Supports both full refresh and incremental modes. On failure, Conduit logs the exact batch, row, and error for debugging.
 
-> **Current status:** Only CSV loader implemented. No database loaders, no batch writing, no incremental merge/append logic.
+> **Current status:** Destination connector modules implemented for CSV, JSON/JSONL, Parquet (built-in), PostgreSQL, MySQL, Snowflake, BigQuery, MongoDB, and S3. All loaders follow the same interface: `(table: pa.Table, dest: DestinationConfig, base_dir: Path) -> None`. Database connectors require their respective driver packages (installed as optional dependencies). Incremental merge/append logic not yet implemented — all loaders currently support full_refresh mode.
 
 ---
 
@@ -566,24 +566,24 @@ sources:
 
 Each database connector is an **independent, opt-in module**. Connectors are not bundled with Conduit core — users add only the ones they need for their project. This keeps the core lightweight with minimal dependencies. Each connector module brings its own driver (e.g. `psycopg2` for PostgreSQL, `pymongo` for MongoDB) only when explicitly added.
 
-> **Current status:** CSV/TSV extractors and CSV loader are built-in (no module install needed). No connector management CLI, no plugin system, no database connector modules.
+> **Current status:** CSV/TSV extractors built-in. Destination loaders implemented for all planned connectors (CSV, JSON/JSONL, Parquet, PostgreSQL, MySQL, Snowflake, BigQuery, MongoDB, S3). Destination CLI management commands (`conduit destination add/rm/enable/disable/list`) implemented. Source connector management CLI still planned.
 
 ### Connector Management CLI
 
 ```bash
-# Add a connector module (installs driver + enables it)
+# ── Source connectors (planned) ──
 conduit source add postgres
-conduit source add mongodb
-
-# Remove a connector module (uninstalls driver)
 conduit source rm mongodb
-
-# Enable / disable without removing
 conduit source enable bigquery
 conduit source disable mysql
-
-# List all available connectors and their status
 conduit source list
+
+# ── Destination connectors ──
+conduit destination add postgres
+conduit destination rm mongodb
+conduit destination enable bigquery
+conduit destination disable mysql
+conduit destination list
 ```
 
 ### `conduit source list` Output
@@ -603,6 +603,25 @@ $ conduit source list
 │ s3           │ src + dest │ boto3                        │ ○ not installed │
 │ snowflake    │ dest       │ snowflake-connector-python   │ ○ not installed │
 └──────────────┴────────────┴──────────────────────────────┴───────────┘
+```
+
+### `conduit destination list` Output
+
+```bash
+$ conduit destination list
+
+CONNECTOR      STATUS       DRIVER
+------------------------------------------------------------------
+bigquery       not installed google-cloud-bigquery
+csv            ready        (built-in)
+json           ready        (built-in)
+jsonl           ready        (built-in)
+mongodb        not installed pymongo
+mysql          not installed pymysql
+parquet        ready        (built-in)
+postgres       not installed psycopg2-binary
+s3             ready        (built-in)
+snowflake      not installed snowflake-connector-python[pandas]
 ```
 
 ### Module Architecture
@@ -628,18 +647,18 @@ Each connector module provides:
 
 ### Connector Capabilities
 
-| Connector | Type | Driver | Capabilities | Status |
-| --- | --- | --- | --- | --- |
-| csv / tsv | src + dest | (built-in) | schema inference | DONE |
-| postgres | src + dest | `psycopg2` | incremental, schema inference | PLANNED |
-| mysql | src + dest | `pymysql` | incremental, schema inference | PLANNED |
-| bigquery | dest | `google-cloud-bigquery` | incremental | PLANNED |
-| mongodb | src + dest | `pymongo` | schema inference | PLANNED |
-| excel | src | `openpyxl` | — | PLANNED |
-| parquet | src + dest | `pyarrow` (built-in) | schema inference, columnar | PLANNED |
-| json / jsonl | src + dest | `pyarrow` (built-in) | — | PLANNED |
-| s3 | src + dest | `boto3` | incremental | PLANNED |
-| snowflake | dest | `snowflake-connector-python` | incremental, schema inference | PLANNED |
+| Connector | Source | Destination | Driver | Capabilities | Status |
+| --- | --- | --- | --- | --- | --- |
+| csv / tsv | DONE | DONE | (built-in) | schema inference | DONE |
+| postgres | PLANNED | DONE | `psycopg2` | incremental, schema inference | PARTIAL |
+| mysql | PLANNED | DONE | `pymysql` | incremental, schema inference | PARTIAL |
+| bigquery | — | DONE | `google-cloud-bigquery` | incremental | PARTIAL |
+| mongodb | PLANNED | DONE | `pymongo` | schema inference | PARTIAL |
+| excel | PLANNED | — | `openpyxl` | — | PLANNED |
+| parquet | PLANNED | DONE | `pyarrow` (built-in) | schema inference, columnar | PARTIAL |
+| json / jsonl | PLANNED | DONE | (built-in) | — | PARTIAL |
+| s3 | PLANNED | DONE | (built-in) | incremental, csv/parquet formats | PARTIAL |
+| snowflake | — | DONE | `snowflake-connector-python` | incremental, schema inference | PARTIAL |
 
 ---
 
@@ -869,12 +888,18 @@ runtime:
 | `conduit report open pipeline.yaml` | Open latest report in browser | PLANNED |
 | **Vault** | | |
 | `conduit vault add / list / get / delete` | Manage encrypted secrets | PLANNED |
-| **Connectors (Module System)** | | |
-| `conduit source add <connector>` | Add and enable a connector module | PLANNED |
-| `conduit source rm <connector>` | Remove a connector module | PLANNED |
-| `conduit source enable <connector>` | Enable a disabled connector | PLANNED |
-| `conduit source disable <connector>` | Disable without removing | PLANNED |
-| `conduit source list` | List all connectors and their status | PLANNED |
+| **Source Connectors** | | |
+| `conduit source add <connector>` | Add and enable a source connector module | PLANNED |
+| `conduit source rm <connector>` | Remove a source connector module | PLANNED |
+| `conduit source enable <connector>` | Enable a disabled source connector | PLANNED |
+| `conduit source disable <connector>` | Disable source without removing | PLANNED |
+| `conduit source list` | List all source connectors and their status | PLANNED |
+| **Destination Connectors** | | |
+| `conduit destination add <connector>` | Add and enable a destination connector module | DONE |
+| `conduit destination rm <connector>` | Remove a destination connector module | DONE |
+| `conduit destination enable <connector>` | Enable a disabled destination connector | DONE |
+| `conduit destination disable <connector>` | Disable destination without removing | DONE |
+| `conduit destination list` | List all destination connectors and their status | DONE |
 | **Time Machine** | | |
 | `conduit lock / unlock / drift <pipeline>` | Schema lock management | PLANNED |
 | `conduit history / revert <pipeline>` | Config version management | PLANNED |

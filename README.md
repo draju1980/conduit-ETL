@@ -13,9 +13,11 @@ Pull data from heterogeneous sources, transform with SQL, validate with built-in
 
 - **SQL transforms** — DuckDB-powered engine: JOINs, CTEs, aggregations, and window functions across all sources
 - **Apache Arrow interchange** — all sources normalized to Arrow tables for consistent in-memory processing
+- **10 destination connectors** — CSV, JSON/JSONL, Parquet, PostgreSQL, MySQL, Snowflake, BigQuery, MongoDB, and S3
 - **Validation pipeline** — schema checks, null checks, row counts, custom SQL assertions, and dry-run mode before any data lands
 - **Configurable failure policy** — per-check `fail` or `warn` behavior with JSON validation reports
 - **YAML-driven pipelines** — declarative `pipeline.yaml` config with Pydantic validation
+- **Connector management CLI** — `conduit destination add/rm/enable/disable/list` for managing destination modules
 - **Cross-platform binaries** — PyInstaller-built standalone executables for macOS (arm64/amd64), Linux, and Windows
 
 ## Quick Start
@@ -104,6 +106,19 @@ destinations:
     mode: full_refresh
     config:
       path: output/result.csv
+
+  # Or load to a database:
+  # - name: warehouse
+  #   type: postgres
+  #   mode: full_refresh
+  #   config:
+  #     host: localhost
+  #     port: 5432
+  #     database: analytics
+  #     user: conduit
+  #     password: ${PG_PASSWORD}
+  #     schema: public
+  #     table: orders_enriched
 ```
 
 ## CLI Reference
@@ -114,9 +129,14 @@ destinations:
 | `conduit run <pipeline.yaml> --dry-run` | Run through validation but skip the load step |
 | `conduit validate <pipeline.yaml>` | Run validation checks only (alias for `--dry-run`) |
 | `conduit run <pipeline.yaml> --verbose` | Execute with debug-level logging |
-| `conduit source add <connector>` | Add and enable a connector module (planned) |
-| `conduit source rm <connector>` | Remove a connector module (planned) |
-| `conduit source list` | List all connectors and their status (planned) |
+| `conduit source add <connector>` | Add and enable a source connector module (planned) |
+| `conduit source rm <connector>` | Remove a source connector module (planned) |
+| `conduit source list` | List all source connectors and their status (planned) |
+| `conduit destination add <connector>` | Add and enable a destination connector module |
+| `conduit destination rm <connector>` | Remove a destination connector module |
+| `conduit destination enable <connector>` | Enable a disabled destination connector |
+| `conduit destination disable <connector>` | Disable a destination connector without removing |
+| `conduit destination list` | List all destination connectors and their status |
 
 ## Validation Checks
 
@@ -159,15 +179,16 @@ error_handling:
 ```
 Sources              Engine                   Validation              Destinations
 +--------------+    +------------------+     +------------------+    +------------------+
-| CSV / TSV    |--->| DuckDB SQL       |--->| Schema checks    |--->| CSV output       |
-|              |    | (JOINs, CTEs,    |    | Null checks      |    |                  |
-|              |    |  window funcs)   |    | Row counts       |    |                  |
-+--------------+    +------------------+    | Custom SQL       |    +------------------+
-  PyArrow            In-memory engine        +------------------+     Batch writer
-  Arrow tables       Virtual tables          JSON reports
+| CSV / TSV    |--->| DuckDB SQL       |--->| Schema checks    |--->| CSV / JSON(L)    |
+|              |    | (JOINs, CTEs,    |    | Null checks      |    | Parquet / S3     |
+|              |    |  window funcs)   |    | Row counts       |    | PostgreSQL/MySQL |
++--------------+    +------------------+    | Custom SQL       |    | Snowflake / BQ   |
+  PyArrow            In-memory engine        +------------------+    | MongoDB          |
+  Arrow tables       Virtual tables          JSON reports            +------------------+
+                                                                      Batch writers
 ```
 
-**Pipeline flow:** Extract (CSV/TSV -> Arrow) -> Transform (DuckDB SQL) -> Validate (4 check types) -> Load (CSV)
+**Pipeline flow:** Extract (CSV/TSV -> Arrow) -> Transform (DuckDB SQL) -> Validate (4 check types) -> Load (10 destination types)
 
 ## Tech Stack
 
@@ -187,32 +208,44 @@ Sources              Engine                   Validation              Destinatio
 Connectors are **opt-in modules** — only CSV/TSV is built-in. Add database connectors as needed for your project. Each module installs only its required driver, keeping Conduit lightweight.
 
 ```bash
-# Add a connector (installs driver + enables)
+# ── Source connectors (planned) ──
 conduit source add postgres
-
-# Remove a connector
-conduit source rm mongodb
-
-# Enable / disable without removing
-conduit source enable bigquery
-conduit source disable mysql
-
-# List all connectors and their status
 conduit source list
+
+# ── Destination connectors ──
+conduit destination add postgres      # enable a destination connector
+conduit destination rm mongodb        # remove a destination connector
+conduit destination enable bigquery   # re-enable a disabled connector
+conduit destination disable mysql     # disable without removing
+conduit destination list              # list all connectors and status
 ```
 
-| Connector | Direction | Driver | Status |
-| --- | --- | --- | --- |
-| CSV / TSV | src + dest | (built-in) | Available |
-| PostgreSQL | src + dest | `psycopg2` | Planned |
-| MySQL | src + dest | `pymysql` | Planned |
-| BigQuery | dest | `google-cloud-bigquery` | Planned |
-| MongoDB | src + dest | `pymongo` | Planned |
-| Excel | src | `openpyxl` | Planned |
-| Parquet | src + dest | `pyarrow` (built-in) | Planned |
-| JSON / JSONL | src + dest | `pyarrow` (built-in) | Planned |
-| S3 | src + dest | `boto3` | Planned |
-| Snowflake | dest | `snowflake-connector-python` | Planned |
+### Install destination drivers
+
+```bash
+# Install individual drivers
+pip install conduit-etl[postgres]     # psycopg2-binary
+pip install conduit-etl[mysql]        # pymysql
+pip install conduit-etl[snowflake]    # snowflake-connector-python
+pip install conduit-etl[bigquery]     # google-cloud-bigquery
+pip install conduit-etl[mongodb]      # pymongo
+
+# Install all destination drivers
+pip install conduit-etl[all-destinations]
+```
+
+| Connector | Source | Destination | Driver | Status |
+| --- | --- | --- | --- | --- |
+| CSV / TSV | Available | Available | (built-in) | Done |
+| JSON / JSONL | Planned | Available | (built-in) | Partial |
+| Parquet | Planned | Available | `pyarrow` (built-in) | Partial |
+| PostgreSQL | Planned | Available | `psycopg2-binary` | Partial |
+| MySQL | Planned | Available | `pymysql` | Partial |
+| BigQuery | — | Available | `google-cloud-bigquery` | Partial |
+| MongoDB | Planned | Available | `pymongo` | Partial |
+| S3 | Planned | Available | (built-in) | Partial |
+| Snowflake | — | Available | `snowflake-connector-python` | Partial |
+| Excel | Planned | — | `openpyxl` | Planned |
 
 ## The `.conduit/` Directory
 
@@ -293,6 +326,14 @@ src/conduit/
     transform.py       # DuckDB SQL transform engine
   loader/
     csv_loader.py      # CSV destination writer
+    json_loader.py     # JSON / JSONL destination writer
+    parquet_loader.py  # Parquet destination writer
+    postgres_loader.py # PostgreSQL destination writer
+    mysql_loader.py    # MySQL destination writer
+    snowflake_loader.py# Snowflake destination writer
+    bigquery_loader.py # BigQuery destination writer
+    mongodb_loader.py  # MongoDB destination writer
+    s3_loader.py       # S3 destination writer (CSV/Parquet)
   validation/
     validators.py      # 4 validator implementations
     runner.py           # Validation orchestrator
