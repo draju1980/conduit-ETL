@@ -32,8 +32,8 @@ cd conduit-ETL
 # Create a virtual environment and install
 make install
 
-# Or install directly with pip
-pip install -e ".[dev]"
+# Or download the latest binary from the releases page
+# https://github.com/<org>/conduit-ETL/releases
 ```
 
 ### Run a pipeline
@@ -220,18 +220,15 @@ conduit destination disable mysql     # disable without removing
 conduit destination list              # list all connectors and status
 ```
 
-### Install destination drivers
+### Destination drivers
+
+All destination drivers are bundled with the Conduit ETL binary — no separate installation is required.
+
+Use the CLI to manage destination connectors:
 
 ```bash
-# Install individual drivers
-pip install conduit-etl[postgres]     # psycopg2-binary
-pip install conduit-etl[mysql]        # pymysql
-pip install conduit-etl[snowflake]    # snowflake-connector-python
-pip install conduit-etl[bigquery]     # google-cloud-bigquery
-pip install conduit-etl[mongodb]      # pymongo
-
-# Install all destination drivers
-pip install conduit-etl[all-destinations]
+conduit destination add postgres      # enable a destination connector
+conduit destination list              # list all available connectors
 ```
 
 | Connector | Source | Destination | Driver | Status |
@@ -278,7 +275,7 @@ make install
 # Or manually
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -e ".[dev]"
+make install
 ```
 
 ### Testing

@@ -19,7 +19,7 @@ def load_bigquery(table: pa.Table, dest: DestinationConfig, base_dir: Path) -> N
     except ImportError:
         raise ImportError(
             "google-cloud-bigquery is required for BigQuery destinations. "
-            "Install it with: pip install google-cloud-bigquery pyarrow"
+            "Please ensure you are using the official Conduit ETL binary which bundles all drivers."
         )
 
     project = dest.config.get("project")

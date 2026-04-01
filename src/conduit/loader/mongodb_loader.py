@@ -19,7 +19,7 @@ def load_mongodb(table: pa.Table, dest: DestinationConfig, base_dir: Path) -> No
     except ImportError:
         raise ImportError(
             "pymongo is required for MongoDB destinations. "
-            "Install it with: pip install pymongo"
+            "Please ensure you are using the official Conduit ETL binary which bundles all drivers."
         )
 
     uri = dest.config.get("uri", "mongodb://localhost:27017")

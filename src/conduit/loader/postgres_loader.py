@@ -20,7 +20,7 @@ def load_postgres(table: pa.Table, dest: DestinationConfig, base_dir: Path) -> N
     except ImportError:
         raise ImportError(
             "psycopg2 is required for PostgreSQL destinations. "
-            "Install it with: pip install psycopg2-binary"
+            "Please ensure you are using the official Conduit ETL binary which bundles all drivers."
         )
 
     conn_params = {

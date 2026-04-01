@@ -57,7 +57,7 @@ def validate(
 
 # ── Destination connector management ─────────────────────────────────
 
-# Mapping of connector names to their pip install requirements
+# Mapping of connector names to their bundled driver packages
 _CONNECTOR_PACKAGES: dict[str, str] = {
     "csv": "(built-in)",
     "json": "(built-in)",
@@ -127,8 +127,8 @@ def destination_add(
     if _check_connector_available(connector):
         typer.echo(f"Connector '{connector}' is already installed and enabled.")
     else:
-        typer.echo(f"Connector '{connector}' enabled. Install its driver with:")
-        typer.echo(f"  pip install {pkg}")
+        typer.echo(f"Connector '{connector}' enabled but its driver ({pkg}) could not be loaded.")
+        typer.echo("Please ensure you are using the official Conduit ETL binary which bundles all drivers.")
 
 
 @destination_app.command("rm")

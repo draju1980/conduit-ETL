@@ -19,7 +19,7 @@ def load_mysql(table: pa.Table, dest: DestinationConfig, base_dir: Path) -> None
     except ImportError:
         raise ImportError(
             "pymysql is required for MySQL destinations. "
-            "Install it with: pip install pymysql"
+            "Please ensure you are using the official Conduit ETL binary which bundles all drivers."
         )
 
     conn_params = {

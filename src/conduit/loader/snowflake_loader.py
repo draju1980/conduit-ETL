@@ -20,7 +20,7 @@ def load_snowflake(table: pa.Table, dest: DestinationConfig, base_dir: Path) -> 
     except ImportError:
         raise ImportError(
             "snowflake-connector-python[pandas] is required for Snowflake destinations. "
-            "Install it with: pip install snowflake-connector-python[pandas]"
+            "Please ensure you are using the official Conduit ETL binary which bundles all drivers."
         )
 
     conn_params = {

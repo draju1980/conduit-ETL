@@ -70,7 +70,7 @@ Before writing to the destination, Conduit runs the data quality validation pass
 
 The connector writes to the destination in batches. Supports both full refresh and incremental modes. On failure, Conduit logs the exact batch, row, and error for debugging.
 
-> **Current status:** Destination connector modules implemented for CSV, JSON/JSONL, Parquet (built-in), PostgreSQL, MySQL, Snowflake, BigQuery, MongoDB, and S3. All loaders follow the same interface: `(table: pa.Table, dest: DestinationConfig, base_dir: Path) -> None`. Database connectors require their respective driver packages (installed as optional dependencies). Incremental merge/append logic not yet implemented — all loaders currently support full_refresh mode.
+> **Current status:** Destination connector modules implemented for CSV, JSON/JSONL, Parquet (built-in), PostgreSQL, MySQL, Snowflake, BigQuery, MongoDB, and S3. All loaders follow the same interface: `(table: pa.Table, dest: DestinationConfig, base_dir: Path) -> None`. All driver packages are bundled with the Conduit ETL binary. Incremental merge/append logic not yet implemented — all loaders currently support full_refresh mode.
 
 ---
 
@@ -564,7 +564,7 @@ sources:
 
 ## Connector Module System `PARTIAL`
 
-Each database connector is an **independent, opt-in module**. Connectors are not bundled with Conduit core — users add only the ones they need for their project. This keeps the core lightweight with minimal dependencies. Each connector module brings its own driver (e.g. `psycopg2` for PostgreSQL, `pymongo` for MongoDB) only when explicitly added.
+Each database connector is an **independent, opt-in module**. All driver packages are bundled with the Conduit ETL binary — users enable only the connectors they need for their project via the CLI. No separate driver installation is required.
 
 > **Current status:** CSV/TSV extractors built-in. Destination loaders implemented for all planned connectors (CSV, JSON/JSONL, Parquet, PostgreSQL, MySQL, Snowflake, BigQuery, MongoDB, S3). Destination CLI management commands (`conduit destination add/rm/enable/disable/list`) implemented. Source connector management CLI still planned.
 
@@ -597,11 +597,11 @@ $ conduit source list
 │ csv / tsv    │ src + dest │ (built-in)                   │ ● built-in│
 │ postgres     │ src + dest │ psycopg2                     │ ● enabled │
 │ mysql        │ src + dest │ pymysql                      │ ○ disabled│
-│ bigquery     │ dest       │ google-cloud-bigquery        │ ○ not installed │
-│ mongodb      │ src + dest │ pymongo                      │ ○ not installed │
-│ excel        │ src        │ openpyxl                     │ ○ not installed │
-│ s3           │ src + dest │ boto3                        │ ○ not installed │
-│ snowflake    │ dest       │ snowflake-connector-python   │ ○ not installed │
+│ bigquery     │ dest       │ google-cloud-bigquery        │ ○ disabled │
+│ mongodb      │ src + dest │ pymongo                      │ ○ disabled │
+│ excel        │ src        │ openpyxl                     │ ○ disabled │
+│ s3           │ src + dest │ boto3                        │ ○ disabled │
+│ snowflake    │ dest       │ snowflake-connector-python   │ ○ disabled │
 └──────────────┴────────────┴──────────────────────────────┴───────────┘
 ```
 
@@ -612,16 +612,16 @@ $ conduit destination list
 
 CONNECTOR      STATUS       DRIVER
 ------------------------------------------------------------------
-bigquery       not installed google-cloud-bigquery
+bigquery       disabled     google-cloud-bigquery
 csv            ready        (built-in)
 json           ready        (built-in)
 jsonl           ready        (built-in)
-mongodb        not installed pymongo
-mysql          not installed pymysql
+mongodb        disabled     pymongo
+mysql          disabled     pymysql
 parquet        ready        (built-in)
-postgres       not installed psycopg2-binary
+postgres       disabled     psycopg2-binary
 s3             ready        (built-in)
-snowflake      not installed snowflake-connector-python[pandas]
+snowflake      disabled     snowflake-connector-python[pandas]
 ```
 
 ### Module Architecture
@@ -630,7 +630,7 @@ Each connector module provides:
 - **Extractor** — reads from the source, returns Arrow tables
 - **Loader** — writes Arrow tables to the destination (if supported)
 - **Schema inspector** — introspects source/destination schema for drift detection
-- **Driver dependency** — the Python package required (installed automatically on `conduit source add`)
+- **Driver dependency** — the Python package required (bundled with the binary, enabled via `conduit destination add`)
 
 ```
 ~/.conduit/modules/
