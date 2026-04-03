@@ -39,6 +39,9 @@ make install
 ### Run a pipeline
 
 ```bash
+# Check installed version
+conduit version
+
 # Execute a pipeline
 conduit run pipeline.yaml
 
@@ -125,6 +128,7 @@ destinations:
 
 | Command | Description |
 | --- | --- |
+| `conduit version` | Show the installed conduit version |
 | `conduit run <pipeline.yaml>` | Execute a full pipeline (extract -> transform -> validate -> load) |
 | `conduit run <pipeline.yaml> --dry-run` | Run through validation but skip the load step |
 | `conduit validate <pipeline.yaml>` | Run validation checks only (alias for `--dry-run`) |

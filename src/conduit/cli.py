@@ -7,7 +7,9 @@ import sys
 
 import typer
 
+from conduit import __version__
 from conduit.pipeline import run_pipeline, _LOADERS
+
 
 app = typer.Typer(name="conduit", help="Conduit - Local-first ELT workbench")
 destination_app = typer.Typer(help="Manage destination connectors")
@@ -53,6 +55,12 @@ def validate(
     success = run_pipeline(pipeline, validate_only=True)
     if not success:
         raise typer.Exit(code=1)
+
+
+@app.command()
+def version() -> None:
+    """Show the conduit version."""
+    typer.echo(f"conduit {__version__}")
 
 
 # ── Destination connector management ─────────────────────────────────
