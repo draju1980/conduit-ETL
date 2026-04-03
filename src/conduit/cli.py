@@ -9,7 +9,7 @@ import typer
 
 from conduit.pipeline import run_pipeline, _LOADERS
 
-app = typer.Typer(name="conduit", help="Conduit — Local-first ELT workbench")
+app = typer.Typer(name="conduit", help="Conduit - Local-first ELT workbench")
 destination_app = typer.Typer(help="Manage destination connectors")
 app.add_typer(destination_app, name="destination")
 
@@ -36,7 +36,7 @@ def run(
     dry_run: bool = typer.Option(False, "--dry-run", help="Validate without loading"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable debug logging"),
 ) -> None:
-    """Execute a pipeline (extract → transform → validate → load)."""
+    """Execute a pipeline (extract -> transform -> validate -> load)."""
     _setup_logging(verbose)
     success = run_pipeline(pipeline, validate_only=dry_run)
     if not success:
