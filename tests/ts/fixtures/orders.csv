@@ -1,0 +1,6 @@
+order_id,customer_id,amount,status,region_id
+1,101,250.0,active,1
+2,102,175.5,active,2
+3,103,500.0,completed,1
+4,101,89.99,active,3
+5,104,1200.0,active,2

@@ -7,43 +7,42 @@ on:
     branches: [master]
 
 jobs:
-  build:
+  test:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-latest
-            asset_name: conduit-linux-amd64
-          - os: macos-14
-            asset_name: conduit-darwin-arm64
-          - os: windows-latest
-            asset_name: conduit-windows-amd64.exe
+        os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
 
     steps:
       - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v6
+      - uses: denoland/setup-deno@v2
         with:
-          python-version: "3.12"
+          deno-version: v2.x
 
       - name: Install dependencies
-        run: pip install -e ".[dev,build]"
+        run: deno install --allow-scripts=npm:@duckdb/node-bindings
+
+      - name: Lint
+        run: deno lint src/ts/ tests/ts/ main.ts
+
+      - name: Type check
+        run: deno check main.ts mod.ts
 
       - name: Run tests
-        run: pytest tests/ -v --tb=short
+        run: deno task test
 
-      - name: Build binary
-        run: pyinstaller conduit.spec --noconfirm --clean
+  publish-dry-run:
+    needs: test
+    runs-on: ubuntu-latest
 
-      - name: Smoke test
-        shell: bash
-        env:
-          PYTHONUTF8: "1"
-        run: |
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            dist/conduit.exe --help
-          else
-            chmod +x dist/conduit
-            dist/conduit --help
-          fi
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Verify JSR publish (dry run)
+        run: deno publish --dry-run --allow-slow-types

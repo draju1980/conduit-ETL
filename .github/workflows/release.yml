@@ -6,81 +6,19 @@ on:
       - "v*"
 
 permissions:
-  contents: write
+  contents: read
+  id-token: write # Required for JSR authentication via OIDC
 
 jobs:
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: macos-14
-            asset_name: conduit-darwin-arm64
-          - os: macos-13
-            asset_name: conduit-darwin-amd64
-          - os: ubuntu-latest
-            asset_name: conduit-linux-amd64
-          - os: windows-latest
-            asset_name: conduit-windows-amd64.exe
-    runs-on: ${{ matrix.os }}
-
-    steps:
-      - uses: actions/checkout@v5
-
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-
-      - name: Install dependencies
-        run: pip install -e ".[build,all-destinations]"
-
-      - name: Build binary
-        run: pyinstaller conduit.spec --noconfirm --clean
-
-      - name: Rename artifact
-        shell: bash
-        run: |
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            mv dist/conduit.exe dist/${{ matrix.asset_name }}
-          else
-            mv dist/conduit dist/${{ matrix.asset_name }}
-            chmod +x dist/${{ matrix.asset_name }}
-          fi
-
-      - name: Smoke test
-        shell: bash
-        env:
-          PYTHONUTF8: "1"
-        run: dist/${{ matrix.asset_name }} --help
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v5
-        with:
-          name: ${{ matrix.asset_name }}
-          path: dist/${{ matrix.asset_name }}
-
-  release:
-    needs: build
+  publish:
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v5
 
-      - uses: actions/download-artifact@v5
+      - uses: denoland/setup-deno@v2
         with:
-          path: artifacts/
-          merge-multiple: true
+          deno-version: v2.x
 
-      - name: Generate checksums
-        run: |
-          cd artifacts
-          sha256sum conduit-* > checksums-sha256.txt
-
-      - name: Create GitHub Release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release create ${{ github.ref_name }} \
-            --title "Conduit ${{ github.ref_name }}" \
-            --generate-notes \
-            artifacts/*
+      - name: Publish to JSR
+        run: deno publish --allow-slow-types

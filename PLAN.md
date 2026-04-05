@@ -4,7 +4,7 @@
 
 ## Overview
 
-Conduit is a local-first ELT (Extract, Transform, Load) workbench for data engineers. It provides a unified SDK and web interface to pull data from heterogeneous sources, transform it with SQL, and export to destination databases or files — all from a single tool.
+Conduit is a local-first ELT (Extract, Transform, Load) workbench for data engineers. It provides a unified SDK and CLI to pull data from heterogeneous sources, transform it with SQL, and export to destination databases or files — all from a single tool built on Deno + TypeScript.
 
 ---
 
@@ -16,12 +16,12 @@ EXTRACT                 TRANSFORM                  VALIDATE                   LO
 ┌─────────────┐        ┌──────────────────┐       ┌──────────────────┐       ┌──────────────────┐
 │ Postgres     │        │                  │       │ Custom           │       │ Snowflake        │
 │ CSV / Excel  │──────▶ │  DuckDB (SQL)    │─────▶ │ Validation       │─────▶ │ BigQuery         │
-│ BigQuery     │ Arrow  │  Transform       │       │ Framework        │       │ CSV export       │
+│ BigQuery     │ Rows   │  Transform       │       │ Framework        │       │ CSV export       │
 │ MongoDB      │        │                  │       │                  │       │ S3               │
 └─────────────┘        └──────────────────┘       └──────────────────┘       └──────────────────┘
   Connector Layer         In-memory engine           Data quality gate          Batch writer
   + Vault secrets         + Schema checks            + 4 check types            + Incremental
-  (CSV/TSV only)                                     (not GE-based)             (CSV only)
+  (CSV/TSV only)                                     (not GE-based)             (full_refresh only)
 ```
 
 ---
@@ -36,9 +36,9 @@ The user defines sources in `pipeline.yaml` or via the web UI. The connector lay
 
 ### Step 2 — Normalize `DONE`
 
-Each connector converts its source data into **Apache Arrow** format. This gives DuckDB a consistent in-memory format regardless of the origin — whether it's a Postgres table, an Excel file, or a MongoDB collection. Schema is inferred at this stage.
+Each connector converts its source data into a **DataTable** (plain JS objects with column metadata). DuckDB is used as the transform engine, which registers these tables via temp CSV files. This gives DuckDB a consistent in-memory format regardless of the origin.
 
-> **Current status:** CSV/TSV sources are converted to Arrow tables via PyArrow. Schema inference not yet implemented for other source types.
+> **Current status:** CSV/TSV sources are read via `@std/csv`, represented as `DataTable { columns: ColumnInfo[], rows: Record<string, unknown>[] }`. Schema inference not yet implemented for other source types.
 
 ### Step 3 — Transform `DONE`
 
@@ -70,15 +70,15 @@ Before writing to the destination, Conduit runs the data quality validation pass
 
 The connector writes to the destination in batches. Supports both full refresh and incremental modes. On failure, Conduit logs the exact batch, row, and error for debugging.
 
-> **Current status:** Destination connector modules implemented for CSV, JSON/JSONL, Parquet (built-in), PostgreSQL, MySQL, Snowflake, BigQuery, MongoDB, and S3. All loaders follow the same interface: `(table: pa.Table, dest: DestinationConfig, base_dir: Path) -> None`. All driver packages are bundled with the Conduit ETL binary. Incremental merge/append logic not yet implemented — all loaders currently support full_refresh mode.
+> **Current status:** Destination connector modules implemented for CSV, JSON/JSONL, Parquet (via DuckDB `COPY TO`), PostgreSQL, MySQL, Snowflake, BigQuery, MongoDB, and S3. All loaders follow the same interface: `(table: DataTable, dest: DestinationConfig, baseDir: string) => Promise<void>`. Incremental merge/append logic not yet implemented — all loaders currently support full_refresh mode.
 
 ---
 
-## Orchestration — Inbuilt Airflow Scheduler `PLANNED`
+## Orchestration — Inbuilt Scheduler `PLANNED`
 
-Apache Airflow is embedded inside Conduit as the scheduling and orchestration engine. Users never interact with Airflow directly — no DAG files, no Airflow UI, no Airflow config. Conduit owns the entire scheduling experience and auto-generates everything Airflow needs internally from `pipeline.yaml`.
+An embedded cron-based scheduler runs inside Conduit as the scheduling engine. Users never interact with a separate scheduler — no DAG files, no external UI, no external config. Conduit owns the entire scheduling experience and auto-generates everything needed internally from `pipeline.yaml`.
 
-> **Current status:** Not implemented. No Airflow integration, no DAG generation, no `conduit up/down` daemon, no scheduling commands.
+> **Current status:** Not implemented. No scheduler, no daemon, no `conduit up/down` commands.
 
 ### How It Works
 
@@ -91,9 +91,9 @@ User interacts with Conduit only
         └── localhost:4000/ui/pipelines   ← schedule management in web UI
                 │
                 ▼
-        Airflow running internally        ← hidden, users never see this
-        DAGs auto-generated from pipeline.yaml
-        Airflow DB + logs → ~/.conduit/airflow/
+        Scheduler running internally     ← hidden, users never see this
+        Jobs auto-generated from pipeline.yaml
+        State + logs → ~/.conduit/scheduler/
 ```
 
 ### What `conduit up` Starts
@@ -101,7 +101,7 @@ User interacts with Conduit only
 ```
 conduit up
     ├── Conduit daemon
-    ├── Airflow scheduler        ← internal, auto-started
+    ├── Cron scheduler           ← internal, auto-started
     ├── REST / WS API (localhost:4000)
     └── Web UI (localhost:4000/ui)
             └── /ui/pipelines    ← schedule + run history management
@@ -163,7 +163,7 @@ regions_sync ──┐
                ├──▶ orders_to_snowflake
 customers_load─┘
 
-Airflow ensures regions_sync and customers_load
+The scheduler ensures regions_sync and customers_load
 complete successfully before orders_to_snowflake runs.
 Users define this in pipeline.yaml — no DAG writing needed.
 ```
@@ -172,18 +172,18 @@ Users define this in pipeline.yaml — no DAG writing needed.
 
 ## Data Quality — Great Expectations Integration `PARTIAL`
 
-Great Expectations validates that data meets defined quality standards **before it lands at the destination**. Conduit integrates GE as the validation engine in Step 4 of the ETL flow.
+Great Expectations (or equivalent TS-based validation engine) validates that data meets defined quality standards **before it lands at the destination**. Conduit integrates GE-style expectations as the validation engine in Step 4 of the ETL flow.
 
 > **Current status:** Validation is implemented using a custom framework (schema, null_check, row_count, custom SQL checks) — NOT Great Expectations. GE integration is planned but not yet built. The custom framework covers the core use cases listed below. JSON reports are generated; HTML reports via GE are not available.
 
 ### How It Works
 
 1. User defines an **expectation suite** per pipeline in `pipeline.yaml`
-2. After the SQL transform, Conduit passes the result to Great Expectations
-3. GE runs all expectations against the data
+2. After the SQL transform, Conduit passes the result to the validation engine
+3. The engine runs all expectations against the data
 4. On failure: pipeline blocks, logs the violations, and skips the load step
 5. On success: pipeline proceeds to load
-6. GE generates a **data quality report** automatically on every run
+6. A **data quality report** is generated automatically on every run
 
 ### Pipeline Config
 
@@ -230,7 +230,7 @@ validation:
 conduit validate pipeline.yaml
 
 # Output
-# Running Great Expectations suite: orders_quality_suite
+# Running validation suite: orders_quality_suite
 # ✓ order_id — not_null               passed (100,000 rows)
 # ✓ order_id — be_unique              passed (100,000 unique)
 # ✓ amount   — be_between [0, 1M]     passed
@@ -240,16 +240,16 @@ conduit validate pipeline.yaml
 
 ### Data Quality Reports
 
-GE generates an HTML report on every run, stored in `.conduit/reports/`:
+JSON reports are generated on every run, stored in `.conduit/reports/`:
 
 ```
 .conduit/
 └── reports/
-    ├── orders_quality_suite_2026-03-27T10:00:00.html
-    └── orders_quality_suite_2026-03-27T16:00:00.html
+    ├── orders_quality_suite_2026-03-27T10-00-00.json
+    └── orders_quality_suite_2026-03-27T16-00-00.json
 ```
 
-Reports are also accessible from the Conduit web UI at `localhost:4000/ui/reports`.
+Reports will also be accessible from the Conduit web UI at `localhost:4000/ui/reports` once the UI is built.
 
 ### Expectation Types Supported
 
@@ -279,18 +279,19 @@ Reports are also accessible from the Conduit web UI at `localhost:4000/ui/report
 
 | Layer | Tool | Role | Status |
 |-------|------|------|--------|
-| ETL Engine | DuckDB + Apache Arrow | Federated SQL + in-memory format | DONE |
-| Orchestration | Apache Airflow | Pipeline scheduling and dependencies | PLANNED |
-| Data Quality | Custom validators (GE planned) | Validation, documentation, monitoring | PARTIAL |
+| Runtime | Deno 2.x | TypeScript-first, secure by default | DONE |
+| ETL Engine | DuckDB (`@duckdb/node-api`) | In-memory SQL transforms | DONE |
+| Orchestration | Embedded cron scheduler | Pipeline scheduling and dependencies | PLANNED |
+| Data Quality | Custom TS validators (GE planned) | Validation, documentation, monitoring | PARTIAL |
 | Error Handling | Retry + backoff + dead letter | Configurable failure recovery | PARTIAL (config only) |
-| Logging | Python logging | Structured log output to stderr | PARTIAL (basic logging done) |
-| SDK / CLI | Python + Typer + FastAPI | Core SDK and local server | PARTIAL (Typer done, FastAPI planned) |
-| Web UI | FastAPI + frontend | Visual pipeline management | PLANNED |
+| Logging | `console.*` / `@std/log` | Structured log output to stderr | PARTIAL (basic logging done) |
+| SDK / CLI | Deno + Cliffy | Core SDK and CLI | DONE |
+| Web UI | TBD (Hono / Fresh / Oak) | Visual pipeline management | PLANNED |
 | Credential Security | Conduit Vault (AES-256) | Encrypted secrets, OS keychain | PLANNED |
-| Config | PyYAML + Pydantic + env vars | Pipeline definition with variable substitution | PARTIAL (YAML done, env vars planned) |
-| Connectors | Pluggable modules | Per-source/destination drivers | PARTIAL (CSV/TSV only) |
-| Distribution | GitHub Actions binaries | PyInstaller cross-platform builds | DONE |
-| Testing | pytest + Docker fixtures | Unit, integration, E2E | PARTIAL (unit tests done, no Docker/E2E) |
+| Config | `@std/yaml` + Zod + env vars | Pipeline definition with variable substitution | PARTIAL (YAML + Zod done, env vars planned) |
+| Connectors | Pluggable modules | Per-source/destination drivers | PARTIAL (CSV/TSV source only; all destinations done) |
+| Distribution | JSR (jsr.io) via `deno install` | Cross-platform package distribution | DONE |
+| Testing | `Deno.test` + `@std/assert` | Unit, integration, E2E | PARTIAL (unit tests done, no integration/E2E) |
 
 ---
 
@@ -298,7 +299,7 @@ Reports are also accessible from the Conduit web UI at `localhost:4000/ui/report
 
 Conduit tracks a **watermark** (last run timestamp or last ID) per pipeline. On subsequent runs, only new or updated rows are pulled — dramatically reducing load times and destination write costs for large datasets.
 
-> **Current status:** Incremental config models defined in Pydantic (strategy, watermark_column, merge_key). No watermark tracking, no state persistence, no incremental extraction or merge logic implemented.
+> **Current status:** Incremental config models defined in Zod schemas (strategy, watermark_column, merge_key). No watermark tracking, no state persistence, no incremental extraction or merge logic implemented.
 
 ```bash
 # First run — full load
@@ -388,15 +389,15 @@ time_machine:
 │   ├── customers.schema.json
 │   └── snowflake_analytics.schema.json
 ├── history/
-│   ├── 2026-03-27T10:00:00.yaml
-│   └── 2026-03-27T16:00:00.yaml
+│   ├── 2026-03-27T10-00-00.yaml
+│   └── 2026-03-27T16-00-00.yaml
 ├── checkpoints/
 │   └── orders_to_warehouse/
 │       ├── state.json
 │       ├── watermarks.json
 │       └── manifest.json
 └── reports/
-    └── orders_quality_suite_2026-03-27T10:00:00.html
+    └── orders_quality_suite_2026-03-27T10-00-00.json
 ```
 
 ### Time Machine CLI
@@ -417,7 +418,7 @@ time_machine:
 
 Conduit runs on user desktops and servers where local disk space is not guaranteed. A pipeline that fails mid-run due to a full disk wastes time, leaves partial state, and can corrupt checkpoints. Conduit prevents this by checking available storage **before** the pipeline starts.
 
-> **Current status:** Config model defined. No disk check logic implemented.
+> **Current status:** Zod config model defined. No disk check logic implemented.
 
 ```yaml
 runtime:
@@ -434,7 +435,7 @@ runtime:
 
 Conduit processes data in **chunks** across the entire pipeline — extract, transform, and load. This keeps local storage usage bounded regardless of dataset size.
 
-> **Current status:** Config model defined (extract_chunk_size, load_batch_size, max_memory_mb, spill_to_disk). No chunking implemented — entire dataset loaded into memory.
+> **Current status:** Zod config model defined (extract_chunk_size, load_batch_size, max_memory_mb, spill_to_disk). No chunking implemented — entire dataset loaded into memory.
 
 ```yaml
 runtime:
@@ -451,7 +452,7 @@ runtime:
 
 Network failures, machine restarts, and transient errors should not force a pipeline to restart from scratch. Conduit tracks progress at the chunk level and resumes from the last successful checkpoint.
 
-> **Current status:** Config model defined (enabled, auto_resume, retention, path). No checkpoint saving, no resume logic, no `--restart` flag implemented.
+> **Current status:** Zod config model defined (enabled, auto_resume, retention, path). No checkpoint saving, no resume logic, no `--restart` flag implemented.
 
 ```bash
 # First run — fails at chunk 88 of 150
@@ -480,7 +481,7 @@ runtime:
 
 Pipeline failures should be recoverable. Conduit provides configurable retry behavior, backoff strategies, and dead-letter routing for rows that fail repeatedly.
 
-> **Current status:** Config model defined (`ErrorHandlingConfig` in models.py) with all fields. No retry logic, no dead-letter routing, no batch-level error handling implemented.
+> **Current status:** Zod config model defined (`ErrorHandlingConfig` in src/ts/models.ts) with all fields. No retry logic, no dead-letter routing, no batch-level error handling implemented.
 
 ### Pipeline Config
 
@@ -513,7 +514,7 @@ Dead-letter files are stored as CSV in the configured path:
 
 ```
 .conduit/dead_letter/
-  orders_to_warehouse_2026-03-27T10:00:00_batch_88.csv
+  orders_to_warehouse_2026-03-27T10-00-00_batch_88.csv
 ```
 
 ---
@@ -522,16 +523,18 @@ Dead-letter files are stored as CSV in the configured path:
 
 Conduit uses structured logging throughout the pipeline. All log output goes to `stderr`, keeping `stdout` clean for piping and scripting.
 
-> **Current status:** Basic Python logging implemented with configurable levels (INFO/DEBUG via `--verbose`). No structured JSON output, no log file rotation, no external log shipping.
+> **Current status:** Basic console logging implemented (`console.log/warn/error`). No structured JSON output, no log file rotation, no external log shipping, no `--verbose` flag yet.
 
 ### Log Format
 
 ```
-2026-03-27 10:00:00 [INFO   ] conduit.pipeline: Pipeline 'orders_to_sf' — starting
-2026-03-27 10:00:01 [INFO   ] conduit.engine.extract: Extracted 100,000 rows from CSV source 'orders'
-2026-03-27 10:00:02 [INFO   ] conduit.engine.transform: Transform complete — 45,230 rows
-2026-03-27 10:00:02 [INFO   ] conduit.validation.runner: Running 4 validation checks
-2026-03-27 10:00:02 [ERROR  ] conduit.pipeline: Pipeline 'orders_to_sf' STOPPED — validation failed
+Pipeline 'orders_to_sf' — starting
+Extracted 100000 rows from CSV source 'orders'
+Transform complete: 45230 rows, 12 columns
+Running 4 validation check(s) for pipeline 'orders_to_sf'
+[✓] schema: Schema check passed
+[✗] custom: Custom validation failed: 42 violating row(s) found
+Pipeline 'orders_to_sf' STOPPED — validation failed
 ```
 
 ### Planned Enhancements
@@ -539,7 +542,7 @@ Conduit uses structured logging throughout the pipeline. All log output goes to 
 | Feature | Description | Status |
 | --- | --- | --- |
 | Console logging | Human-readable log output to stderr | DONE |
-| `--verbose` flag | Switch between INFO and DEBUG levels | DONE |
+| `--verbose` flag | Switch between INFO and DEBUG levels | PLANNED |
 | JSON log format | `--log-format json` for machine-readable output | PLANNED |
 | Log file output | `--log-file <path>` to write logs to a file | PLANNED |
 | Run summary | Summary table at end of pipeline (rows extracted, transformed, loaded, duration) | PLANNED |
@@ -564,7 +567,7 @@ sources:
 
 ## Connector Module System `PARTIAL`
 
-Each database connector is an **independent, opt-in module**. All driver packages are bundled with the Conduit ETL binary — users enable only the connectors they need for their project via the CLI. No separate driver installation is required.
+Each database connector is an **independent module**. All driver packages are resolved as npm dependencies via Deno's npm compatibility — users enable only the connectors they need for their project via the CLI.
 
 > **Current status:** CSV/TSV extractors built-in. Destination loaders implemented for all planned connectors (CSV, JSON/JSONL, Parquet, PostgreSQL, MySQL, Snowflake, BigQuery, MongoDB, S3). Destination CLI management commands (`conduit destination add/rm/enable/disable/list`) implemented. Source connector management CLI still planned.
 
@@ -594,14 +597,14 @@ $ conduit source list
 ┌──────────────┬────────────┬──────────────────────────────┬───────────┐
 │ Connector    │ Type       │ Driver                       │ Status    │
 ├──────────────┼────────────┼──────────────────────────────┼───────────┤
-│ csv / tsv    │ src + dest │ (built-in)                   │ ● built-in│
-│ postgres     │ src + dest │ psycopg2                     │ ● enabled │
-│ mysql        │ src + dest │ pymysql                      │ ○ disabled│
-│ bigquery     │ dest       │ google-cloud-bigquery        │ ○ disabled │
-│ mongodb      │ src + dest │ pymongo                      │ ○ disabled │
-│ excel        │ src        │ openpyxl                     │ ○ disabled │
-│ s3           │ src + dest │ boto3                        │ ○ disabled │
-│ snowflake    │ dest       │ snowflake-connector-python   │ ○ disabled │
+│ csv / tsv    │ src + dest │ @std/csv (built-in)          │ ● built-in│
+│ postgres     │ src + dest │ npm:postgres                 │ ● enabled │
+│ mysql        │ src + dest │ npm:mysql2                   │ ○ disabled│
+│ bigquery     │ dest       │ npm:@google-cloud/bigquery   │ ○ disabled│
+│ mongodb      │ src + dest │ npm:mongodb                  │ ○ disabled│
+│ excel        │ src        │ npm:exceljs                  │ ○ disabled│
+│ s3           │ src + dest │ npm:@aws-sdk/client-s3       │ ○ disabled│
+│ snowflake    │ dest       │ npm:snowflake-sdk            │ ○ disabled│
 └──────────────┴────────────┴──────────────────────────────┴───────────┘
 ```
 
@@ -612,61 +615,62 @@ $ conduit destination list
 
 CONNECTOR      STATUS       DRIVER
 ------------------------------------------------------------------
-bigquery       disabled     google-cloud-bigquery
+bigquery       ready        npm:@google-cloud/bigquery
 csv            ready        (built-in)
 json           ready        (built-in)
-jsonl           ready        (built-in)
-mongodb        disabled     pymongo
-mysql          disabled     pymysql
+jsonl          ready        (built-in)
+mongodb        ready        npm:mongodb
+mysql          ready        npm:mysql2
 parquet        ready        (built-in)
-postgres       disabled     psycopg2-binary
-s3             ready        (built-in)
-snowflake      disabled     snowflake-connector-python[pandas]
+postgres       ready        npm:postgres
+s3             ready        npm:@aws-sdk/client-s3
+snowflake      ready        npm:snowflake-sdk
 ```
 
 ### Module Architecture
 
 Each connector module provides:
-- **Extractor** — reads from the source, returns Arrow tables
-- **Loader** — writes Arrow tables to the destination (if supported)
+- **Extractor** — reads from the source, returns DataTable (rows + column metadata)
+- **Loader** — writes DataTable to the destination (if supported)
 - **Schema inspector** — introspects source/destination schema for drift detection
-- **Driver dependency** — the Python package required (bundled with the binary, enabled via `conduit destination add`)
+- **Driver dependency** — the npm package required (resolved via Deno npm compat)
 
 ```
-~/.conduit/modules/
-  postgres/
-    extractor.py
-    loader.py
-    inspector.py
-    module.yaml        # metadata: name, driver, capabilities
-  mongodb/
-    extractor.py
-    inspector.py
-    module.yaml
+src/ts/loader/
+  csv_loader.ts        # built-in
+  json_loader.ts       # built-in
+  parquet_loader.ts    # DuckDB COPY TO (built-in)
+  postgres_loader.ts   # npm:postgres
+  mysql_loader.ts      # npm:mysql2
+  snowflake_loader.ts  # npm:snowflake-sdk
+  bigquery_loader.ts   # npm:@google-cloud/bigquery
+  mongodb_loader.ts    # npm:mongodb
+  s3_loader.ts         # npm:@aws-sdk/client-s3
+  mod.ts               # LoaderFn type + registry
 ```
 
 ### Connector Capabilities
 
 | Connector | Source | Destination | Driver | Capabilities | Status |
 | --- | --- | --- | --- | --- | --- |
-| csv / tsv | DONE | DONE | (built-in) | schema inference | DONE |
-| postgres | PLANNED | DONE | `psycopg2` | incremental, schema inference | PARTIAL |
-| mysql | PLANNED | DONE | `pymysql` | incremental, schema inference | PARTIAL |
-| bigquery | — | DONE | `google-cloud-bigquery` | incremental | PARTIAL |
-| mongodb | PLANNED | DONE | `pymongo` | schema inference | PARTIAL |
-| excel | PLANNED | — | `openpyxl` | — | PLANNED |
-| parquet | PLANNED | DONE | `pyarrow` (built-in) | schema inference, columnar | PARTIAL |
+| csv / tsv | DONE | DONE | `@std/csv` (built-in) | schema inference | DONE |
+| postgres | PLANNED | DONE | `npm:postgres` | incremental, schema inference | PARTIAL |
+| mysql | PLANNED | DONE | `npm:mysql2` | incremental, schema inference | PARTIAL |
+| bigquery | — | DONE | `npm:@google-cloud/bigquery` | incremental | PARTIAL |
+| mongodb | PLANNED | DONE | `npm:mongodb` | schema inference | PARTIAL |
+| excel | PLANNED | — | `npm:exceljs` | — | PLANNED |
+| parquet | PLANNED | DONE | DuckDB `COPY TO` (built-in) | schema inference, columnar | PARTIAL |
 | json / jsonl | PLANNED | DONE | (built-in) | — | PARTIAL |
-| s3 | PLANNED | DONE | (built-in) | incremental, csv/parquet formats | PARTIAL |
-| snowflake | — | DONE | `snowflake-connector-python` | incremental, schema inference | PARTIAL |
+| s3 | PLANNED | DONE | `npm:@aws-sdk/client-s3` | incremental, csv/parquet formats | PARTIAL |
+| snowflake | — | DONE | `npm:snowflake-sdk` | incremental, schema inference | PARTIAL |
 
 ---
 
 ## Web UI `PLANNED`
 
-Conduit includes an optional web interface for visual pipeline management. The web UI is served locally via FastAPI and is never exposed to the internet by default.
+Conduit will include an optional web interface for visual pipeline management. The web UI will be served locally via a lightweight Deno HTTP framework (Hono / Fresh / Oak) and is never exposed to the internet by default.
 
-> **Current status:** Not implemented. No FastAPI server, no frontend, no web routes.
+> **Current status:** Not implemented. No HTTP server, no frontend, no web routes.
 
 ### Features
 
@@ -675,7 +679,7 @@ Conduit includes an optional web interface for visual pipeline management. The w
 | Pipeline dashboard | List all pipelines with status, schedule, last run | PLANNED |
 | Pipeline editor | Visual YAML editor with validation | PLANNED |
 | Run history | View past runs with logs, duration, row counts | PLANNED |
-| Validation reports | Browse HTML/JSON quality reports | PLANNED |
+| Validation reports | Browse JSON quality reports | PLANNED |
 | Connector management | Add/remove/enable/disable connectors via UI | PLANNED |
 | Schema explorer | Browse source/destination schemas and drift status | PLANNED |
 
@@ -683,13 +687,13 @@ Conduit includes an optional web interface for visual pipeline management. The w
 
 ```
 conduit serve --port 4000
-    ├── FastAPI REST API       ← localhost:4000/api/
-    └── Web UI                 ← localhost:4000/ui/
-        ├── /ui/pipelines      ← dashboard
-        ├── /ui/runs           ← run history
-        ├── /ui/reports        ← validation reports
-        ├── /ui/connectors     ← connector management
-        └── /ui/schemas        ← schema explorer
+    ├── REST API              ← localhost:4000/api/
+    └── Web UI                ← localhost:4000/ui/
+        ├── /ui/pipelines     ← dashboard
+        ├── /ui/runs          ← run history
+        ├── /ui/reports       ← validation reports
+        ├── /ui/connectors    ← connector management
+        └── /ui/schemas       ← schema explorer
 ```
 
 The web UI can also be started alongside the scheduler via `conduit up`.
@@ -796,27 +800,28 @@ transform:
     FROM orders o
     WHERE o.status = 'active'
 
-# ── Validation (Great Expectations) ───────────────────────
+# ── Validation ────────────────────────────────────────────
 validation:
-  engine: great_expectations
-  suite: my_pipeline_suite
-  on_failure: block                        # block | warn
-  report:
-    enabled: true
-    path: .conduit/reports/
-  expectations:
-    - column: order_id
-      expect: not_null
-    - column: order_id
-      expect: be_unique
-    - column: amount
-      expect: be_between
-      min: 0
-      max: 1000000
-    - table:
-      expect: row_count_to_be_between
-      min: 1
-      max: 10000000
+  - type: schema
+    columns:
+      - { name: order_id, type: INTEGER }
+      - { name: amount, type: DECIMAL }
+    on_failure: fail
+
+  - type: null_check
+    columns: [order_id, amount]
+    on_failure: fail
+
+  - type: row_count
+    min: 1
+    max: 10000000
+    on_failure: warn
+
+  - type: custom
+    sql: |
+      SELECT * FROM __result__
+      WHERE amount < 0 OR amount > 1000000
+    on_failure: fail
 
 # ── Destination ───────────────────────────────────────────
 destinations:
@@ -858,9 +863,9 @@ runtime:
 | Command | Description | Status |
 | --- | --- | --- |
 | **General** | | |
-| `conduit --version` | Show Conduit version | PLANNED |
+| `conduit version` | Show Conduit version + component versions | DONE |
 | `conduit init` | Initialize a new Conduit project (creates `.conduit/` and sample `pipeline.yaml`) | PLANNED |
-| `conduit up` | Start daemon, Airflow scheduler, API server, and web UI | PLANNED |
+| `conduit up` | Start daemon, scheduler, API server, and web UI | PLANNED |
 | `conduit down` | Stop everything | PLANNED |
 | `conduit status` | Show running state and connections | PLANNED |
 | **Templates** | | |
@@ -889,11 +894,11 @@ runtime:
 | **Vault** | | |
 | `conduit vault add / list / get / delete` | Manage encrypted secrets | PLANNED |
 | **Source Connectors** | | |
-| `conduit source add <connector>` | Add and enable a source connector module | PLANNED |
-| `conduit source rm <connector>` | Remove a source connector module | PLANNED |
-| `conduit source enable <connector>` | Enable a disabled source connector | PLANNED |
-| `conduit source disable <connector>` | Disable source without removing | PLANNED |
-| `conduit source list` | List all source connectors and their status | PLANNED |
+| `conduit source add <connector>` | Add and enable a source connector module | DONE |
+| `conduit source rm <connector>` | Remove a source connector module | DONE |
+| `conduit source enable <connector>` | Enable a disabled source connector | DONE |
+| `conduit source disable <connector>` | Disable source without removing | DONE |
+| `conduit source list` | List all source connectors and their status | DONE |
 | **Destination Connectors** | | |
 | `conduit destination add <connector>` | Add and enable a destination connector module | DONE |
 | `conduit destination rm <connector>` | Remove a destination connector module | DONE |
@@ -970,7 +975,7 @@ $ conduit init .
 
 ## Testing Strategy `PARTIAL`
 
-> **Current status:** 33 unit/integration tests covering core ETL + validation logic. No Docker-based integration tests, no E2E tests against real databases, no lint/security CI gates.
+> **Current status:** 24 test steps across 4 test files covering core ETL + validation logic. Uses `Deno.test` + `@std/assert` (no external test runner). No integration tests against real databases, no E2E tests, no lint/security CI gates.
 
 ### Testing Pyramid
 
@@ -990,27 +995,28 @@ $ conduit init .
 
 ```yaml
 jobs:
-  unit-tests:                          # DONE — runs in ci.yml matrix
-    run: pytest tests/unit --cov=conduit --cov-fail-under=80
+  test:                                # DONE — runs in ci.yml matrix
+    run: deno task test
+
+  type-check:                          # DONE
+    run: deno check main.ts mod.ts
+
+  lint:                                # DONE
+    run: deno lint
 
   integration-tests:                   # PLANNED — no Docker services in CI
     services:
       postgres: postgres:15
       mysql: mysql:8
-    run: pytest tests/integration
+    run: deno test tests/ts/integration/ --allow-all
 
   e2e-tests:                           # PLANNED — no E2E test suite
-    run: pytest tests/e2e
-
-  lint:                                # PLANNED — not in CI workflow
-    run: |
-      ruff check .
-      mypy .
+    run: deno test tests/ts/e2e/ --allow-all
 
   security:                            # PLANNED — not in CI workflow
     run: |
-      bandit -r src/
-      pip-audit
+      deno info --json
+      npm audit
 ```
 
 ### Release Gate
@@ -1019,15 +1025,16 @@ jobs:
 Tag v0.x.0 pushed
       │
       ├── All CI checks green ✓
-      ├── Coverage above 80% ✓
-      ├── No security vulnerabilities ✓
-      └── Lint clean ✓
+      ├── Type check passes ✓
+      ├── Lint clean ✓
+      ├── Tests passing ✓
+      └── JSR publish dry-run succeeds ✓
       │
       ▼
-Binary built for macOS (arm64 + amd64), Linux, Windows
+Package published to JSR via deno publish
       │
       ▼
-GitHub Release published ✓
+Users install via: deno install -Agf -n conduit jsr:@conduit/etl/cli
 ```
 
 ---
@@ -1036,4 +1043,21 @@ GitHub Release published ✓
 
 | Phase | Method | Status |
 |-------|--------|--------|
-| Phase 1 | GitHub Releases binary CLI | DONE |
+| Phase 1 | JSR (jsr.io) via `deno install` | DONE |
+
+### How users install
+
+```bash
+# Install globally as a CLI command
+deno install -Agf -n conduit jsr:@conduit/etl/cli
+
+# Or use as a library
+import { runPipeline } from "jsr:@conduit/etl";
+```
+
+### Why JSR over `deno compile` binaries
+
+- **Native dependency handling**: DuckDB's `.node` addon has an `@rpath` dependency on `libduckdb.dylib`. `deno compile` cannot bundle shared libraries alongside native addons, so compiled binaries fail at runtime. `deno install` from JSR resolves `node_modules` correctly, including adjacent shared libraries.
+- **Cross-platform by default**: JSR publishes platform-agnostic source; Deno fetches the correct native deps per user's platform on install.
+- **No binary maintenance**: No need to build and upload separate binaries for macOS arm64, Linux amd64, Windows amd64. One `deno publish` → all platforms.
+- **Updates via re-install**: Users update with `deno install -Agf -n conduit jsr:@conduit/etl/cli` — Deno pulls the latest version.
