@@ -36,9 +36,16 @@ The user defines sources in `pipeline.yaml` or via the web UI. The connector lay
 
 ### Step 2 — Normalize `DONE`
 
-Each connector converts its source data into a **DataTable** (plain JS objects with column metadata). DuckDB is used as the transform engine, which registers these tables via temp CSV files. This gives DuckDB a consistent in-memory format regardless of the origin.
+Each connector converts its source data into a **DataTable** (plain JS objects with column metadata). The normalize module (`src/ts/normalize.ts`) writes each DataTable to a temp CSV and registers it as a DuckDB table via `read_csv` with `auto_detect=true`. This gives DuckDB a consistent in-memory format regardless of the origin.
 
-> **Current status:** CSV/TSV sources are read via `@std/csv`, represented as `DataTable { columns: ColumnInfo[], rows: Record<string, unknown>[] }`. Schema inference not yet implemented for other source types.
+The normalize module provides:
+- `createSession()` / `closeSession()` — DuckDB session lifecycle
+- `registerTable()` / `registerSources()` — DataTable → DuckDB table registration
+- `querySession()` — Execute SQL and return results as DataTable
+
+Both the transform engine and custom validation checks use the normalize module, eliminating duplicated DuckDB registration logic.
+
+> **Current status:** Fully implemented in `src/ts/normalize.ts` with 8 dedicated tests. CSV/TSV sources are read via `@std/csv`, represented as `DataTable { columns: ColumnInfo[], rows: Record<string, unknown>[] }`. DuckDB auto-detects proper column types (INTEGER, DOUBLE, etc.) during normalization. Schema inference not yet implemented for other source types.
 
 ### Step 3 — Transform `DONE`
 
@@ -51,19 +58,30 @@ JOIN regions r ON o.region_id = r.id
 WHERE o.status = 'active'
 ```
 
-### Step 4 — Validate (Custom Framework) `DONE`
+### Step 4 — Validate (Great Expectations-style) `DONE`
 
 Before writing to the destination, Conduit runs the data quality validation pass. This step verifies that the transformed data meets defined expectations before any data lands at the destination.
 
-> **Current status:** Implemented using a custom validation framework (not Great Expectations). Supports 4 check types: schema, null_check, row_count, custom SQL. on_failure policy (fail/warn) fully working. JSON reports generated per run.
+> **Current status:** Full validation engine with 30 GE-style expectations + 4 legacy check types. All expectations run via DuckDB SQL through the normalize module. Supports `mostly` threshold parameter, rich result format (element_count, unexpected_count, partial_unexpected_list), and backwards-compatible YAML config (old `type:` and new `expectation_type:` formats coexist). One shared DuckDB session per validation run. 81 tests cover all expectations.
 
 | Check | Description | Status |
 | --- | --- | --- |
-| Schema check | Output columns match destination schema | DONE |
-| Null check | Required fields are not empty | DONE |
-| Row count | Catches silent empty result sets | DONE |
-| Custom SQL | Arbitrary SQL validation queries | DONE |
-| GE Expectations | Great Expectations integration | PLANNED |
+| Schema check (legacy) | Output columns match destination schema | DONE |
+| Null check (legacy) | Required fields are not empty | DONE |
+| Row count (legacy) | Catches silent empty result sets | DONE |
+| Custom SQL (legacy) | Arbitrary SQL validation queries | DONE |
+| GE: Table-level (6) | Row count, column count, column matching | DONE |
+| GE: Column existence (3) | Column exists, type check, type list | DONE |
+| GE: Completeness (2) | Not-null, be-null with `mostly` | DONE |
+| GE: Set membership (4) | In-set, not-in-set, distinct equal/contain | DONE |
+| GE: Numeric (3) | Between, increasing, decreasing | DONE |
+| GE: Uniqueness (1) | Unique values with `mostly` | DONE |
+| GE: String (4) | Regex match, lengths equal/between | DONE |
+| GE: Aggregate (7) | Min, max, mean, median, stdev, sum, unique count | DONE |
+| GE: Multi-column | Column pair, compound uniqueness | PLANNED |
+| GE: Distribution | KL divergence, quantiles, chi-squared | PLANNED |
+| GE: Format validators | Email, UUID, IP, date format | PLANNED |
+| Expectation suites | Named YAML collections | PLANNED |
 | Dry run mode | Stops here and reports what would load | DONE |
 
 ### Step 5 — Load `PARTIAL`
@@ -74,11 +92,11 @@ The connector writes to the destination in batches. Supports both full refresh a
 
 ---
 
-## Orchestration — Inbuilt Scheduler `PLANNED`
+## Orchestration — Inbuilt Scheduler `PARTIAL`
 
 An embedded cron-based scheduler runs inside Conduit as the scheduling engine. Users never interact with a separate scheduler — no DAG files, no external UI, no external config. Conduit owns the entire scheduling experience and auto-generates everything needed internally from `pipeline.yaml`.
 
-> **Current status:** Not implemented. No scheduler, no daemon, no `conduit up/down` commands.
+> **Current status:** Daemon lifecycle implemented (`conduit up/down/status/init`). HTTP server with `/health`, `/api/status`, and `/ui` endpoints. PID file management and stale process detection. Scheduler logic, cron scheduling, and pipeline dependency resolution not yet implemented.
 
 ### How It Works
 

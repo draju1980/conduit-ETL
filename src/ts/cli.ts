@@ -6,6 +6,13 @@ import { Command } from "@cliffy/command";
 import { runPipeline } from "./pipeline.ts";
 import { LOADERS } from "./loader/mod.ts";
 import { EXTRACTORS } from "./engine/extract.ts";
+import { initProject } from "./init.ts";
+import {
+  formatUptime,
+  isDaemonRunning,
+  startDaemon,
+  stopDaemon,
+} from "./daemon.ts";
 
 const VERSION = "0.1.0";
 
@@ -289,4 +296,94 @@ export const app = new Command()
       }),
   )
   .command("destination", destination)
-  .command("source", source);
+  .command("source", source)
+  .command(
+    "init",
+    new Command()
+      .description("Initialize a new Conduit project (creates .conduit/ and sample pipeline.yaml).")
+      .option("-d, --dir <path:string>", "Target directory (defaults to cwd)")
+      .action((opts) => {
+        const result = initProject(opts.dir);
+        if (result.created.length === 0) {
+          console.log("Project already initialized — nothing to create.");
+          for (const s of result.skipped) {
+            console.log(`  (exists) ${s}`);
+          }
+          return;
+        }
+        console.log("Conduit project initialized:");
+        for (const c of result.created) {
+          console.log(`  + ${c}`);
+        }
+        if (result.skipped.length > 0) {
+          for (const s of result.skipped) {
+            console.log(`  (exists) ${s}`);
+          }
+        }
+        console.log();
+        console.log("Next steps:");
+        console.log("  1. Edit pipeline.yaml to define your sources and transforms");
+        console.log("  2. Run: conduit run pipeline.yaml");
+      }),
+  )
+  .command(
+    "up",
+    new Command()
+      .description("Start the Conduit daemon (scheduler, API server, and web UI).")
+      .option("-p, --port <port:number>", "Port for the API/UI server", { default: 4000 })
+      .action((opts) => {
+        console.log("Starting Conduit...");
+        try {
+          const state = startDaemon(opts.port, VERSION);
+          console.log();
+          console.log(`  Conduit daemon    PID ${state.pid}`);
+          console.log(`  Scheduler         running`);
+          console.log(`  API server        http://127.0.0.1:${state.port}`);
+          console.log(`  Web UI            http://127.0.0.1:${state.port}/ui`);
+          console.log();
+          console.log("Conduit is up. Use 'conduit down' to stop.");
+        } catch (err) {
+          console.error(`Failed to start: ${(err as Error).message}`);
+          Deno.exit(1);
+        }
+      }),
+  )
+  .command(
+    "down",
+    new Command()
+      .description("Stop the running Conduit daemon.")
+      .action(() => {
+        const stopped = stopDaemon();
+        if (stopped) {
+          console.log("Conduit stopped.");
+        } else {
+          console.log("Conduit is not running.");
+        }
+      }),
+  )
+  .command(
+    "status",
+    new Command()
+      .description("Show the running state and connection details.")
+      .action(() => {
+        const { running, state } = isDaemonRunning();
+        if (!running || !state) {
+          console.log("Conduit is not running.");
+          console.log("Run 'conduit up' to start.");
+          return;
+        }
+        const uptime = formatUptime(state.startedAt);
+        console.log("Conduit is running:");
+        console.log();
+        console.log(`  PID          ${state.pid}`);
+        console.log(`  Port         ${state.port}`);
+        console.log(`  Version      ${state.version}`);
+        console.log(`  Started      ${state.startedAt}`);
+        console.log(`  Uptime       ${uptime}`);
+        console.log();
+        console.log("Endpoints:");
+        console.log(`  API          http://127.0.0.1:${state.port}/api/status`);
+        console.log(`  Health       http://127.0.0.1:${state.port}/health`);
+        console.log(`  Web UI       http://127.0.0.1:${state.port}/ui`);
+      }),
+  );

@@ -1,10 +1,17 @@
 /**
  * Transform data using DuckDB SQL engine.
+ *
+ * Uses the normalize module to register source DataTables as DuckDB
+ * tables, then executes the user's SQL and returns the result.
  */
 
-import { DuckDBInstance } from "@duckdb/node-api";
 import type { DataTable } from "../models.ts";
-import { writeCsvSync } from "../util.ts";
+import {
+  createSession,
+  closeSession,
+  registerSources,
+  querySession,
+} from "../normalize/mod.ts";
 
 /**
  * Register source tables in DuckDB and execute the transform SQL.
@@ -14,44 +21,21 @@ export async function runTransform(
   sql: string,
   sources: Map<string, DataTable>,
 ): Promise<DataTable> {
-  const instance = await DuckDBInstance.create();
-  const conn = await instance.connect();
-  const tmpDir = Deno.makeTempDirSync();
+  const session = await createSession();
 
   try {
-    for (const [name, table] of sources) {
-      const csvPath = `${tmpDir}/${name}.csv`;
-      writeCsvSync(csvPath, table);
+    // Normalize: convert all source DataTables → DuckDB tables
+    await registerSources(session, sources);
 
-      await conn.run(
-        `CREATE TABLE "${name}" AS SELECT * FROM read_csv('${csvPath}', auto_detect=true)`,
-      );
-      console.log(
-        `Registered source '${name}' (${table.rows.length} rows, ${table.columns.length} cols)`,
-      );
-    }
-
+    // Transform: run user SQL across all registered tables
     console.log(`Running transform SQL (${sql.trim().length} characters)`);
-    const reader = await conn.runAndReadAll(sql);
-    const colNames = reader.columnNames();
-    const rows = reader.getRowObjectsJS() as Record<string, unknown>[];
-
-    // Get column types
-    const columns = colNames.map((name, i) => ({
-      name,
-      type: reader.columnType(i)?.toString() ?? "VARCHAR",
-    }));
+    const result = await querySession(session, sql);
 
     console.log(
-      `Transform complete: ${rows.length} rows, ${columns.length} columns`,
+      `Transform complete: ${result.rows.length} rows, ${result.columns.length} columns`,
     );
-    return { columns, rows };
+    return result;
   } finally {
-    conn.closeSync();
-    try {
-      Deno.removeSync(tmpDir, { recursive: true });
-    } catch {
-      // Cleanup best-effort
-    }
+    closeSession(session);
   }
 }

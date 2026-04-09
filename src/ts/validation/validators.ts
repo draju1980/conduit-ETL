@@ -2,9 +2,13 @@
  * Individual validation check implementations.
  */
 
-import { DuckDBInstance } from "@duckdb/node-api";
 import type { DataTable, ValidationCheck } from "../models.ts";
-import { writeCsvSync } from "../util.ts";
+import {
+  createSession,
+  closeSession,
+  registerTable,
+  querySession,
+} from "../normalize/mod.ts";
 import type { ValidationFinding } from "./models.ts";
 
 // DuckDB type → accepted YAML type names
@@ -191,25 +195,17 @@ export async function validateCustom(
   }
 
   try {
-    const instance = await DuckDBInstance.create();
-    const conn = await instance.connect();
-    const tmpDir = Deno.makeTempDirSync();
+    const session = await createSession();
 
     try {
-      // Write table to temp CSV for DuckDB
-      const csvPath = `${tmpDir}/__result__.csv`;
-      writeCsvSync(csvPath, table);
+      // Normalize the result table into DuckDB as "__result__"
+      await registerTable(session, "__result__", table);
 
-      await conn.run(
-        `CREATE TABLE "__result__" AS SELECT * FROM read_csv('${csvPath}', auto_detect=true)`,
-      );
-
-      const reader = await conn.runAndReadAll(check.sql);
-      const resultRows = reader.getRowObjectsJS() as Record<string, unknown>[];
-      const violationCount = resultRows.length;
+      const result = await querySession(session, check.sql);
+      const violationCount = result.rows.length;
 
       if (violationCount > 0) {
-        const sample = resultRows.slice(0, 5);
+        const sample = result.rows.slice(0, 5);
         return {
           checkType: "custom",
           status: "fail",
@@ -227,12 +223,7 @@ export async function validateCustom(
         timestamp: new Date(),
       };
     } finally {
-      conn.closeSync();
-      try {
-        Deno.removeSync(tmpDir, { recursive: true });
-      } catch {
-        // best effort
-      }
+      closeSession(session);
     }
   } catch (e) {
     return {

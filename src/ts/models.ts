@@ -76,6 +76,22 @@ export const ValidationCheckSchema = z.object({
 });
 export type ValidationCheck = z.infer<typeof ValidationCheckSchema>;
 
+// ── Expectation check (GE-style) ────────────────────────────────────
+
+export const ExpectationCheckSchema = z.object({
+  expectation_type: z.string(),
+  kwargs: z.record(z.unknown()).default({}),
+  on_failure: z.enum(["fail", "warn"]).default("fail"),
+});
+export type ExpectationCheck = z.infer<typeof ExpectationCheckSchema>;
+
+/** Union of old-style ValidationCheck and new GE-style ExpectationCheck. */
+export const ValidationItemSchema = z.union([
+  ValidationCheckSchema,
+  ExpectationCheckSchema,
+]);
+export type ValidationItem = z.infer<typeof ValidationItemSchema>;
+
 // ── Destination ─────────────────────────────────────────────────────
 
 export const IncrementalDestConfigSchema = z.object({
@@ -146,7 +162,7 @@ export const PipelineConfigSchema = z.object({
   pipeline: PipelineMetadataSchema,
   sources: z.array(SourceConfigSchema).default([]),
   transform: TransformConfigSchema,
-  validation: z.array(ValidationCheckSchema).default([]),
+  validation: z.array(ValidationItemSchema).default([]),
   destinations: z.array(DestinationConfigSchema).default([]),
   runtime: RuntimeConfigSchema.default({}),
   error_handling: ErrorHandlingConfigSchema.default({}),
