@@ -1,24 +1,24 @@
-name: Release
+# name: Release
 
-on:
-  push:
-    tags:
-      - "v*"
+# on:
+#   push:
+#     tags:
+#       - "v*"
 
-permissions:
-  contents: read
-  id-token: write # Required for JSR authentication via OIDC
+# permissions:
+#   contents: read
+#   id-token: write # Required for JSR authentication via OIDC
 
-jobs:
-  publish:
-    runs-on: ubuntu-latest
+# jobs:
+#   publish:
+#     runs-on: ubuntu-latest
 
-    steps:
-      - uses: actions/checkout@v5
+#     steps:
+#       - uses: actions/checkout@v5
 
-      - uses: denoland/setup-deno@v2
-        with:
-          deno-version: v2.x
+#       - uses: denoland/setup-deno@v2
+#         with:
+#           deno-version: v2.x
 
-      - name: Publish to JSR
-        run: deno publish --allow-slow-types
+#       - name: Publish to JSR
+#         run: deno publish --allow-slow-types
