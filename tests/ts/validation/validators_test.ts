@@ -77,6 +77,31 @@ Deno.test("null_check: fail with nulls", () => {
   assertEquals(counts["customer_id"], 1);
 });
 
+Deno.test("null_check: pass message names the columns", () => {
+  const table = createSampleTable();
+  const finding = validateNullCheck(table, {
+    type: "null_check",
+    on_failure: "fail",
+    columns: ["order_id", "amount"],
+  });
+  assertEquals(finding.status, "pass");
+  assertEquals(
+    finding.message,
+    "Null check passed: no nulls in order_id, amount",
+  );
+});
+
+Deno.test("null_check: pass message says 'all columns' when none specified", () => {
+  const table = createSampleTable();
+  const finding = validateNullCheck(table, {
+    type: "null_check",
+    on_failure: "fail",
+    columns: [],
+  });
+  assertEquals(finding.status, "pass");
+  assertEquals(finding.message, "Null check passed: no nulls in all columns");
+});
+
 // ── Row count validator ───────────────────────
 
 Deno.test("row_count: pass within range", () => {
@@ -111,6 +136,66 @@ Deno.test("row_count: fail above max", () => {
     max: 2,
   });
   assertEquals(finding.status, "fail");
+});
+
+Deno.test("row_count: pass message renders bounded range", () => {
+  const table = createSampleTable();
+  const finding = validateRowCount(table, {
+    type: "row_count",
+    on_failure: "fail",
+    columns: [],
+    min: 1,
+    max: 100,
+  });
+  assertEquals(finding.status, "pass");
+  assertEquals(
+    finding.message,
+    "Row count check passed: 5 rows (range: 1-100)",
+  );
+});
+
+Deno.test("row_count: pass message renders >= when only min", () => {
+  const table = createSampleTable();
+  const finding = validateRowCount(table, {
+    type: "row_count",
+    on_failure: "fail",
+    columns: [],
+    min: 1,
+  });
+  assertEquals(finding.status, "pass");
+  assertEquals(
+    finding.message,
+    "Row count check passed: 5 rows (range: >=1)",
+  );
+});
+
+Deno.test("row_count: pass message renders <= when only max", () => {
+  const table = createSampleTable();
+  const finding = validateRowCount(table, {
+    type: "row_count",
+    on_failure: "fail",
+    columns: [],
+    max: 100,
+  });
+  assertEquals(finding.status, "pass");
+  assertEquals(
+    finding.message,
+    "Row count check passed: 5 rows (range: <=100)",
+  );
+});
+
+Deno.test("row_count: pass message says unbounded when neither min nor max", () => {
+  const table = createSampleTable();
+  const finding = validateRowCount(table, {
+    type: "row_count",
+    on_failure: "fail",
+    columns: [],
+  });
+  assertEquals(finding.status, "pass");
+  assertEquals(
+    finding.message,
+    "Row count check passed: 5 rows (range: unbounded)",
+  );
 });
 
 // ── Custom SQL validator ──────────────────────

@@ -1,0 +1,1507 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Conduit-ETL — Local-first ELT workbench for data engineers</title>
+  <meta name="description" content="Open-source, local-first ELT workbench. Pull data from heterogeneous sources, transform with SQL, validate with 30 built-in expectations, load to 10 destinations. Built on Deno + TypeScript." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT@9..144,300..900,0..100&family=IBM+Plex+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    /* ─── Reset ────────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+    body { min-height: 100vh; }
+    img, svg { max-width: 100%; display: block; }
+    button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+    a { color: inherit; }
+
+    /* ─── Theme ────────────────────────────────────────────────────── */
+    :root {
+      --bg:           #0c0c0d;
+      --bg-soft:      #131316;
+      --bg-elev:      #18181c;
+      --bg-code:      #08080a;
+      --ink:          #ece7da;
+      --ink-2:        #b8b1a3;
+      --ink-3:        #7a7468;
+      --ink-4:        #4a463e;
+      --line:         #232327;
+      --line-2:       #2e2e34;
+      --accent:       #c4f24a;
+      --accent-glow:  rgba(196, 242, 74, 0.2);
+      --accent-warm:  #ff9248;
+      --accent-rose:  #f06a82;
+      --accent-sky:   #6dc4f0;
+      --done:         #c4f24a;
+      --planned:      #6a6660;
+
+      --font-display: 'Fraunces', 'Times New Roman', serif;
+      --font-body:    'IBM Plex Sans', system-ui, sans-serif;
+      --font-mono:    'JetBrains Mono', ui-monospace, monospace;
+
+      --maxw:         920px;
+      --rhy:          1.6rem;
+      --radius:       4px;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--ink);
+      font-family: var(--font-body);
+      font-weight: 400;
+      font-size: 16px;
+      line-height: 1.65;
+      letter-spacing: 0.005em;
+      font-feature-settings: "ss01", "cv11";
+    }
+
+    /* ─── Grain texture overlay ────────────────────────────────────── */
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 100;
+      opacity: 0.035;
+      mix-blend-mode: overlay;
+      background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='200' height='200' filter='url(%23n)' opacity='1'/></svg>");
+    }
+
+    /* ─── Layout ───────────────────────────────────────────────────── */
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 30;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 1rem 2rem;
+      background: rgba(12, 12, 13, 0.78);
+      backdrop-filter: blur(18px) saturate(140%);
+      -webkit-backdrop-filter: blur(18px) saturate(140%);
+      border-bottom: 1px solid var(--line);
+    }
+    .brand {
+      display: flex;
+      align-items: baseline;
+      gap: 0.55rem;
+      font-family: var(--font-mono);
+      font-size: 0.92rem;
+      font-weight: 600;
+    }
+    .brand-mark {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      background: var(--accent);
+      transform: skew(-12deg);
+      box-shadow: 0 0 18px var(--accent-glow);
+      align-self: center;
+      margin-right: 0.25rem;
+    }
+    .brand-name { color: var(--ink); }
+    .brand-divider { color: var(--ink-3); font-weight: 400; }
+    .brand-tag { color: var(--accent); }
+
+    .topbar-meta {
+      display: flex;
+      align-items: center;
+      gap: 1.25rem;
+      font-family: var(--font-mono);
+      font-size: 0.78rem;
+    }
+    .version-pill {
+      padding: 0.22rem 0.6rem;
+      border: 1px solid var(--line-2);
+      border-radius: 100px;
+      color: var(--ink-2);
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+    .version-pill em {
+      color: var(--accent);
+      font-style: normal;
+    }
+    .topbar-link {
+      color: var(--ink-2);
+      text-decoration: none;
+      transition: color 0.2s;
+    }
+    .topbar-link:hover { color: var(--accent); }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 240px minmax(0, 1fr);
+      gap: 0;
+      max-width: 1320px;
+      margin: 0 auto;
+      padding: 0 2rem;
+    }
+
+    /* ─── Sidebar ──────────────────────────────────────────────────── */
+    .sidebar {
+      position: sticky;
+      top: 65px;
+      height: calc(100vh - 65px);
+      overflow-y: auto;
+      padding: 3rem 2rem 3rem 0;
+      border-right: 1px dashed var(--line);
+      font-family: var(--font-mono);
+      font-size: 0.82rem;
+    }
+    .sidebar::-webkit-scrollbar { width: 6px; }
+    .sidebar::-webkit-scrollbar-track { background: transparent; }
+    .sidebar::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 3px; }
+
+    .nav-group { margin-bottom: 2rem; }
+    .nav-label {
+      color: var(--ink-3);
+      font-size: 0.68rem;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      margin-bottom: 0.7rem;
+      padding-bottom: 0.5rem;
+      border-bottom: 1px solid var(--line);
+    }
+    .sidebar nav a {
+      display: flex;
+      align-items: center;
+      padding: 0.32rem 0;
+      color: var(--ink-2);
+      text-decoration: none;
+      transition: color 0.18s, transform 0.18s;
+      letter-spacing: -0.005em;
+    }
+    .sidebar nav a::before {
+      content: "·";
+      color: var(--ink-4);
+      margin-right: 0.6rem;
+      transition: color 0.18s;
+    }
+    .sidebar nav a:hover {
+      color: var(--ink);
+      transform: translateX(3px);
+    }
+    .sidebar nav a:hover::before { color: var(--accent); }
+    .sidebar nav a.active {
+      color: var(--accent);
+    }
+    .sidebar nav a.active::before {
+      content: "→";
+      color: var(--accent);
+    }
+
+    /* ─── Main content ─────────────────────────────────────────────── */
+    .content {
+      padding: 4rem 0 6rem 4rem;
+      max-width: var(--maxw);
+    }
+
+    section {
+      margin-bottom: 5.5rem;
+      scroll-margin-top: 90px;
+    }
+
+    /* ─── Typography ───────────────────────────────────────────────── */
+    h1, h2, h3, h4 {
+      font-family: var(--font-display);
+      font-weight: 380;
+      letter-spacing: -0.022em;
+      line-height: 1.04;
+      color: var(--ink);
+      font-feature-settings: "ss01" 1;
+    }
+    h2 {
+      font-size: clamp(2rem, 4.5vw, 3rem);
+      margin: 0 0 0.4rem;
+      font-variation-settings: "opsz" 144, "SOFT" 30;
+    }
+    h2 .ord {
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      font-weight: 500;
+      letter-spacing: 0.2em;
+      color: var(--accent);
+      vertical-align: super;
+      margin-right: 0.7rem;
+    }
+    h2 + .section-rule {
+      height: 1px;
+      background: linear-gradient(to right, var(--accent) 0, var(--accent) 60px, var(--line) 60px, var(--line) 100%);
+      margin-bottom: 2.2rem;
+    }
+    h3 {
+      font-size: 1.5rem;
+      margin: 2.2rem 0 0.7rem;
+      font-variation-settings: "opsz" 36, "SOFT" 50;
+    }
+    h4 {
+      font-family: var(--font-mono);
+      font-weight: 600;
+      font-size: 0.78rem;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--ink-2);
+      margin: 1.4rem 0 0.6rem;
+    }
+    p { margin: 0 0 1.1rem; max-width: 64ch; }
+    em { font-style: italic; color: var(--accent); font-variation-settings: "SOFT" 80; }
+    strong { font-weight: 600; color: var(--ink); }
+
+    a.inline {
+      color: var(--accent);
+      text-decoration: none;
+      border-bottom: 1px solid transparent;
+      transition: border-color 0.2s;
+    }
+    a.inline:hover { border-color: var(--accent); }
+
+    /* ─── Hero ─────────────────────────────────────────────────────── */
+    .hero {
+      padding: 5rem 0 3rem;
+      position: relative;
+    }
+    .hero-meta {
+      display: flex;
+      align-items: center;
+      gap: 0.8rem;
+      font-family: var(--font-mono);
+      font-size: 0.74rem;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--ink-3);
+      margin-bottom: 2.5rem;
+    }
+    .hero-meta::before {
+      content: "";
+      width: 24px;
+      height: 1px;
+      background: var(--accent);
+    }
+    .hero-title {
+      font-family: var(--font-display);
+      font-size: clamp(2.6rem, 7vw, 5.4rem);
+      font-weight: 300;
+      line-height: 0.96;
+      letter-spacing: -0.035em;
+      margin: 0 0 2rem;
+      font-variation-settings: "opsz" 144, "SOFT" 0;
+    }
+    .hero-title em {
+      font-style: italic;
+      color: var(--accent);
+      font-weight: 400;
+      font-variation-settings: "opsz" 144, "SOFT" 80;
+    }
+    .hero-lede {
+      font-size: 1.18rem;
+      line-height: 1.55;
+      color: var(--ink-2);
+      max-width: 56ch;
+      margin: 0 0 2.5rem;
+    }
+    .hero-flow {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      flex-wrap: wrap;
+      margin: 2.5rem 0 2rem;
+      font-family: var(--font-mono);
+      font-size: 0.74rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--ink-3);
+    }
+    .hero-flow .stage {
+      padding: 0.45rem 0.7rem;
+      border: 1px solid var(--line-2);
+      border-radius: 2px;
+      color: var(--ink);
+      background: var(--bg-soft);
+      transition: border-color 0.25s, color 0.25s;
+    }
+    .hero-flow .stage:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    .hero-flow .arr {
+      color: var(--ink-4);
+      letter-spacing: 0;
+    }
+    .hero-cta { margin-top: 2rem; }
+    .hero-install {
+      display: inline-block;
+      padding: 0.85rem 1.2rem;
+      background: var(--bg-code);
+      border: 1px solid var(--line-2);
+      border-left: 2px solid var(--accent);
+      border-radius: var(--radius);
+      font-family: var(--font-mono);
+      font-size: 0.88rem;
+      color: var(--ink);
+      position: relative;
+    }
+    .hero-install::before {
+      content: "$";
+      color: var(--accent);
+      margin-right: 0.7rem;
+    }
+
+    /* ─── Feature grid ─────────────────────────────────────────────── */
+    .feature-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 0;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      overflow: hidden;
+      margin-top: 2rem;
+    }
+    .feature {
+      padding: 1.7rem 1.6rem;
+      border-right: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      background: var(--bg-soft);
+      position: relative;
+      transition: background 0.25s;
+    }
+    .feature:hover { background: var(--bg-elev); }
+    .feature::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 0;
+      height: 1px;
+      background: var(--accent);
+      transition: width 0.4s ease;
+    }
+    .feature:hover::after { width: 100%; }
+    .feature-num {
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      color: var(--accent);
+      margin-bottom: 0.8rem;
+    }
+    .feature h3 {
+      font-family: var(--font-display);
+      font-size: 1.18rem;
+      font-weight: 400;
+      letter-spacing: -0.01em;
+      margin: 0 0 0.5rem;
+      font-variation-settings: "opsz" 36, "SOFT" 50;
+    }
+    .feature p {
+      font-size: 0.92rem;
+      color: var(--ink-2);
+      line-height: 1.55;
+      margin: 0;
+    }
+
+    /* ─── Architecture diagram ────────────────────────────────────── */
+    .diagram {
+      margin: 2rem 0;
+      padding: 2.6rem 1.5rem;
+      background:
+        linear-gradient(var(--bg-soft), var(--bg-soft)) padding-box,
+        repeating-linear-gradient(45deg, var(--line) 0, var(--line) 1px, transparent 1px, transparent 14px) border-box;
+      border: 1px solid transparent;
+      border-radius: var(--radius);
+      overflow-x: auto;
+    }
+    .diagram svg { margin: 0 auto; }
+
+    /* ─── Code blocks ──────────────────────────────────────────────── */
+    pre {
+      margin: 1.4rem 0;
+      padding: 1.4rem 1.4rem 1.4rem 3.4rem;
+      background: var(--bg-code);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      overflow-x: auto;
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+      line-height: 1.6;
+      position: relative;
+    }
+    pre.shell::before {
+      content: "$";
+      position: absolute;
+      left: 1.4rem;
+      top: 1.4rem;
+      color: var(--accent);
+      user-select: none;
+    }
+    pre.yaml::before {
+      content: "yaml";
+      position: absolute;
+      left: 1.4rem;
+      top: 1.4rem;
+      font-size: 0.65rem;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--ink-3);
+      writing-mode: vertical-rl;
+      transform: rotate(180deg);
+      height: calc(100% - 2.8rem);
+      width: 1rem;
+      user-select: none;
+    }
+    pre.ts::before {
+      content: "ts";
+      position: absolute;
+      left: 1.4rem;
+      top: 1.4rem;
+      font-size: 0.65rem;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--accent-sky);
+      writing-mode: vertical-rl;
+      transform: rotate(180deg);
+      height: calc(100% - 2.8rem);
+      width: 1rem;
+      user-select: none;
+    }
+    pre code { color: var(--ink); display: block; }
+    pre::-webkit-scrollbar { height: 6px; }
+    pre::-webkit-scrollbar-track { background: transparent; }
+    pre::-webkit-scrollbar-thumb { background: var(--line-2); }
+
+    code:not(pre code) {
+      font-family: var(--font-mono);
+      font-size: 0.86em;
+      padding: 0.1em 0.42em;
+      background: var(--bg-soft);
+      border: 1px solid var(--line);
+      border-radius: 3px;
+      color: var(--accent);
+      white-space: nowrap;
+    }
+
+    /* Syntax highlighting tokens */
+    .tk-key   { color: var(--accent-sky); }
+    .tk-str   { color: var(--accent); }
+    .tk-num   { color: var(--accent-warm); }
+    .tk-com   { color: var(--ink-3); font-style: italic; }
+    .tk-fn    { color: var(--accent-rose); }
+    .tk-kw    { color: var(--accent-warm); }
+    .tk-flag  { color: var(--accent); }
+    .tk-cmd   { color: var(--ink); font-weight: 600; }
+
+    /* ─── Tables ───────────────────────────────────────────────────── */
+    .data-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.88rem;
+      margin: 1.4rem 0;
+      border: 1px solid var(--line);
+    }
+    .data-table thead {
+      background: var(--bg-soft);
+    }
+    .data-table th {
+      text-align: left;
+      padding: 0.85rem 1rem;
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      font-weight: 600;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--ink-2);
+      border-bottom: 1px solid var(--line-2);
+    }
+    .data-table td {
+      padding: 0.7rem 1rem;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+    }
+    .data-table tr:last-child td { border-bottom: 0; }
+    .data-table tr.section-row td {
+      background: var(--bg-soft);
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      font-weight: 600;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--accent);
+      padding: 0.5rem 1rem;
+    }
+    .data-table td code { white-space: nowrap; }
+    .data-table tr:hover td:not(.no-hover) { background: rgba(196, 242, 74, 0.025); }
+
+    .badge {
+      display: inline-block;
+      padding: 0.18rem 0.55rem;
+      font-family: var(--font-mono);
+      font-size: 0.66rem;
+      font-weight: 600;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      border-radius: 100px;
+      border: 1px solid;
+    }
+    .badge-done {
+      color: var(--done);
+      border-color: rgba(196, 242, 74, 0.4);
+      background: rgba(196, 242, 74, 0.05);
+    }
+    .badge-planned {
+      color: var(--planned);
+      border-color: var(--line-2);
+    }
+
+    /* ─── Validation catalog ──────────────────────────────────────── */
+    .cat-group { margin-top: 2rem; }
+    .cat-head {
+      display: flex;
+      align-items: baseline;
+      gap: 1rem;
+      padding-bottom: 0.6rem;
+      border-bottom: 1px solid var(--line);
+      margin-bottom: 1rem;
+    }
+    .cat-head h3 {
+      margin: 0;
+      font-family: var(--font-display);
+      font-size: 1.4rem;
+      font-weight: 400;
+      letter-spacing: -0.012em;
+      font-variation-settings: "opsz" 36, "SOFT" 50;
+    }
+    .cat-count {
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--accent);
+    }
+    .cat-meta {
+      margin-left: auto;
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      color: var(--ink-3);
+    }
+    .exp-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 0.5rem 1.5rem;
+    }
+    .exp-list li {
+      padding: 0.55rem 0;
+      border-bottom: 1px dotted var(--line);
+      font-size: 0.88rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.18rem;
+    }
+    .exp-list li code {
+      font-family: var(--font-mono);
+      font-size: 0.78rem;
+      color: var(--accent);
+      background: transparent;
+      border: none;
+      padding: 0;
+    }
+    .exp-list li span {
+      color: var(--ink-2);
+      font-size: 0.83rem;
+      line-height: 1.4;
+    }
+
+    /* ─── Step list ────────────────────────────────────────────────── */
+    .steps {
+      list-style: none;
+      padding: 0;
+      margin: 1.5rem 0;
+      counter-reset: step;
+    }
+    .steps li {
+      position: relative;
+      padding: 0 0 1.6rem 3.6rem;
+      border-left: 1px dashed var(--line-2);
+      margin-left: 0.7rem;
+    }
+    .steps li:last-child { border-left-color: transparent; }
+    .steps li::before {
+      counter-increment: step;
+      content: counter(step, decimal-leading-zero);
+      position: absolute;
+      left: -0.85rem;
+      top: -0.2rem;
+      width: 1.7rem;
+      height: 1.7rem;
+      background: var(--bg);
+      border: 1px solid var(--accent);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      font-weight: 600;
+      color: var(--accent);
+    }
+    .steps h4 {
+      margin: 0 0 0.4rem;
+      color: var(--ink);
+      font-family: var(--font-display);
+      font-size: 1.05rem;
+      font-weight: 400;
+      letter-spacing: -0.005em;
+      text-transform: none;
+      font-variation-settings: "opsz" 36, "SOFT" 40;
+    }
+    .steps p { margin: 0 0 0.6rem; color: var(--ink-2); font-size: 0.95rem; }
+
+    /* ─── Destination grid ────────────────────────────────────────── */
+    .dest-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+      gap: 0.5rem;
+      margin: 1.5rem 0;
+    }
+    .dest-chip {
+      padding: 0.85rem 1rem;
+      background: var(--bg-soft);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      font-family: var(--font-mono);
+      font-size: 0.82rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.6rem;
+      transition: border-color 0.2s, color 0.2s, transform 0.2s;
+    }
+    .dest-chip:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+      transform: translateY(-1px);
+    }
+    .dest-chip .dot {
+      width: 6px;
+      height: 6px;
+      background: var(--accent);
+      border-radius: 50%;
+      box-shadow: 0 0 8px var(--accent-glow);
+    }
+
+    /* ─── Callout ──────────────────────────────────────────────────── */
+    .callout {
+      margin: 1.6rem 0;
+      padding: 1rem 1.3rem;
+      background: var(--bg-soft);
+      border-left: 2px solid var(--accent);
+      border-radius: 0 var(--radius) var(--radius) 0;
+      font-size: 0.92rem;
+      color: var(--ink-2);
+    }
+    .callout strong { color: var(--accent); font-weight: 500; }
+
+    /* ─── Footer ───────────────────────────────────────────────────── */
+    .footer {
+      margin-top: 6rem;
+      padding: 2.5rem 0 3rem;
+      border-top: 1px solid var(--line);
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      flex-wrap: wrap;
+      gap: 2rem;
+      font-family: var(--font-mono);
+      font-size: 0.78rem;
+      color: var(--ink-3);
+    }
+    .footer-mark {
+      font-family: var(--font-display);
+      font-size: 2.4rem;
+      font-weight: 300;
+      font-style: italic;
+      color: var(--ink-2);
+      line-height: 0.9;
+      margin-bottom: 0.6rem;
+      font-variation-settings: "opsz" 144, "SOFT" 80;
+    }
+    .footer-meta { color: var(--ink-3); }
+    .footer-meta strong { color: var(--ink-2); font-weight: 500; }
+    .footer-cols { display: flex; gap: 3rem; }
+    .footer-col h5 {
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      font-weight: 600;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--ink-2);
+      margin: 0 0 0.7rem;
+    }
+    .footer-col a {
+      display: block;
+      color: var(--ink-3);
+      text-decoration: none;
+      padding: 0.18rem 0;
+      transition: color 0.18s;
+    }
+    .footer-col a:hover { color: var(--accent); }
+
+    /* ─── Reveal animation ────────────────────────────────────────── */
+    @keyframes reveal-up {
+      from { opacity: 0; transform: translateY(14px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .reveal {
+      animation: reveal-up 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
+    }
+
+    /* ─── Responsive ───────────────────────────────────────────────── */
+    @media (max-width: 880px) {
+      .layout {
+        grid-template-columns: 1fr;
+        padding: 0 1.25rem;
+      }
+      .sidebar {
+        position: static;
+        height: auto;
+        border-right: 0;
+        border-bottom: 1px dashed var(--line);
+        padding: 1.5rem 0;
+        font-size: 0.78rem;
+      }
+      .sidebar nav {
+        display: flex;
+        gap: 1.5rem;
+        overflow-x: auto;
+        padding-bottom: 0.5rem;
+      }
+      .nav-group { margin: 0; flex-shrink: 0; }
+      .content { padding: 2rem 0 4rem; }
+      .topbar { padding: 0.85rem 1.25rem; }
+      .topbar-link { display: none; }
+      .hero { padding: 2.5rem 0 2rem; }
+      .footer { flex-direction: column; }
+      .footer-cols { gap: 2rem; flex-wrap: wrap; }
+    }
+
+    /* ─── Selection ────────────────────────────────────────────────── */
+    ::selection {
+      background: var(--accent);
+      color: var(--bg);
+    }
+  </style>
+</head>
+<body>
+
+<!-- ═══ TOPBAR ═════════════════════════════════════════════════════════ -->
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark"></span>
+    <span class="brand-name">conduit</span><span class="brand-divider">/</span><span class="brand-tag">etl</span>
+  </div>
+  <div class="topbar-meta">
+    <span class="version-pill">v0.1.0 · <em>alpha</em></span>
+    <a href="#install" class="topbar-link">install →</a>
+  </div>
+</header>
+
+<div class="layout">
+
+  <!-- ═══ SIDEBAR ═══════════════════════════════════════════════════════ -->
+  <aside class="sidebar">
+    <nav id="toc">
+      <div class="nav-group">
+        <div class="nav-label">Read</div>
+        <a href="#overview">Overview</a>
+        <a href="#features">Features</a>
+        <a href="#architecture">Architecture</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-label">Use</div>
+        <a href="#install">Install</a>
+        <a href="#quickstart">Quick start</a>
+        <a href="#pipeline">Pipeline YAML</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-label">Reference</div>
+        <a href="#cli">CLI commands</a>
+        <a href="#validation">Validation catalog</a>
+        <a href="#destinations">Destinations</a>
+      </div>
+    </nav>
+  </aside>
+
+  <!-- ═══ MAIN ═════════════════════════════════════════════════════════ -->
+  <main class="content">
+
+    <!-- HERO ─────────────────────────────────────────────────────────── -->
+    <section class="hero reveal" style="animation-delay: 0.05s">
+      <div class="hero-meta">Documentation · v0.1.0 · MIT License</div>
+      <h1 class="hero-title">
+        A local-first<br />
+        <em>ELT workbench</em><br />
+        for data engineers.
+      </h1>
+      <p class="hero-lede">
+        Pull data from heterogeneous sources, transform with SQL, validate with thirty
+        built-in expectations, and load to ten destinations — all from a single CLI tool
+        built on Deno + TypeScript.
+      </p>
+
+      <div class="hero-flow" aria-label="Pipeline stages">
+        <span class="stage">extract</span>
+        <span class="arr">→</span>
+        <span class="stage">normalize</span>
+        <span class="arr">→</span>
+        <span class="stage">transform</span>
+        <span class="arr">→</span>
+        <span class="stage">validate</span>
+        <span class="arr">→</span>
+        <span class="stage">load</span>
+      </div>
+
+      <div class="hero-cta">
+        <code class="hero-install">deno install -Agf -n conduit jsr:@conduit/etl/cli</code>
+      </div>
+    </section>
+
+    <!-- OVERVIEW ─────────────────────────────────────────────────────── -->
+    <section id="overview">
+      <h2><span class="ord">01</span>Overview</h2>
+      <div class="section-rule"></div>
+
+      <p>
+        <strong>Conduit-ETL</strong> is an open-source ELT workbench that runs on your
+        laptop, on a server, or anywhere Deno runs. Pipelines are described in a single
+        <code>pipeline.yaml</code> file and executed by a single binary — no orchestrator
+        cluster, no cloud account required, no configuration sprawl.
+      </p>
+      <p>
+        The product is built around four convictions: pipelines should be
+        <em>declarative</em>, transforms should be <em>SQL</em>, data quality should be
+        <em>first-class</em>, and the whole thing should be <em>local-first</em>. You can
+        run a complete extract → transform → validate → load cycle without leaving your
+        terminal.
+      </p>
+
+      <div class="callout">
+        <strong>Status — </strong>
+        Core pipeline (extract / normalize / transform / validate / load), the CLI,
+        the connector framework, and 30 GE-style validators are <em>shipped and tested</em>
+        (81 passing tests). The daemon, scheduler, web UI, vault, and time-machine
+        features are scoped in <code>PLAN.md</code> and still in progress.
+      </div>
+    </section>
+
+    <!-- FEATURES ─────────────────────────────────────────────────────── -->
+    <section id="features">
+      <h2><span class="ord">02</span>Features</h2>
+      <div class="section-rule"></div>
+
+      <div class="feature-grid">
+        <article class="feature">
+          <div class="feature-num">01 · ENGINE</div>
+          <h3>SQL transforms via DuckDB</h3>
+          <p>JOINs, CTEs, window functions, and aggregations across every source — uniform SQL semantics regardless of where the data came from.</p>
+        </article>
+        <article class="feature">
+          <div class="feature-num">02 · LOAD</div>
+          <h3>Ten destination types</h3>
+          <p>CSV, JSON, JSONL, Parquet, PostgreSQL, MySQL, Snowflake, BigQuery, MongoDB, and S3 — all driven by the same loader interface.</p>
+        </article>
+        <article class="feature">
+          <div class="feature-num">03 · VALIDATE</div>
+          <h3>30 GE-style expectations</h3>
+          <p>Table, column, aggregate, set membership, regex, uniqueness, numeric range, and string-length checks with a <code>mostly</code> partial-pass threshold.</p>
+        </article>
+        <article class="feature">
+          <div class="feature-num">04 · POLICY</div>
+          <h3>Per-check failure policy</h3>
+          <p>Each expectation can <code>fail</code> or <code>warn</code>. Validation reports land in <code>.conduit/reports/</code> as JSON for downstream tooling.</p>
+        </article>
+        <article class="feature">
+          <div class="feature-num">05 · CONFIG</div>
+          <h3>YAML-driven pipelines</h3>
+          <p>One declarative file describes sources, transforms, validation, and destinations. Schema-validated by Zod at load time.</p>
+        </article>
+        <article class="feature">
+          <div class="feature-num">06 · CONNECTORS</div>
+          <h3>Pluggable connector CLI</h3>
+          <p><code>conduit source add / rm / enable / disable / list</code> — and the same for destinations. Modules can be turned on per-project.</p>
+        </article>
+        <article class="feature">
+          <div class="feature-num">07 · DISTRIBUTION</div>
+          <h3>JSR-distributed</h3>
+          <p>Install with one Deno command on macOS, Linux, or Windows. Native dependencies (DuckDB, drivers) resolve automatically per platform.</p>
+        </article>
+        <article class="feature">
+          <div class="feature-num">08 · LIBRARY</div>
+          <h3>Use as a TypeScript library</h3>
+          <p>Import <code>runPipeline</code>, <code>loadPipeline</code>, or any individual stage — embed Conduit inside your own Deno application.</p>
+        </article>
+      </div>
+    </section>
+
+    <!-- ARCHITECTURE ─────────────────────────────────────────────────── -->
+    <section id="architecture">
+      <h2><span class="ord">03</span>Architecture</h2>
+      <div class="section-rule"></div>
+
+      <p>
+        Every pipeline runs through five stages. The <em>normalize</em> step is the hinge
+        of the system — it converts whatever shape a connector produces into a uniform
+        DuckDB table so the SQL engine never has to care where the data came from.
+      </p>
+
+      <div class="diagram">
+        <svg viewBox="0 0 1100 280" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Pipeline architecture diagram">
+          <defs>
+            <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 Z" fill="#c4f24a" />
+            </marker>
+            <pattern id="dots" width="6" height="6" patternUnits="userSpaceOnUse">
+              <circle cx="3" cy="3" r="0.6" fill="#2e2e34" />
+            </pattern>
+          </defs>
+
+          <rect x="0" y="0" width="1100" height="280" fill="url(#dots)" opacity="0.4" />
+
+          <!-- Connecting flow line -->
+          <path d="M 100 130 H 1000" stroke="#2e2e34" stroke-width="1" stroke-dasharray="2 4" />
+
+          <!-- Stages -->
+          <!-- 1. EXTRACT -->
+          <g transform="translate(40, 70)">
+            <rect width="160" height="120" fill="#131316" stroke="#2e2e34" stroke-width="1" rx="3" />
+            <text x="14" y="26" fill="#c4f24a" font-family="JetBrains Mono, monospace" font-size="9" letter-spacing="2">01 · STAGE</text>
+            <text x="14" y="58" fill="#ece7da" font-family="Fraunces, serif" font-size="22" font-weight="400">Extract</text>
+            <text x="14" y="80" fill="#7a7468" font-family="JetBrains Mono, monospace" font-size="10">CSV · JSON</text>
+            <text x="14" y="95" fill="#7a7468" font-family="JetBrains Mono, monospace" font-size="10">Parquet · …</text>
+            <text x="14" y="110" fill="#4a463e" font-family="JetBrains Mono, monospace" font-size="9">connectors</text>
+          </g>
+          <path d="M 200 130 L 232 130" stroke="#c4f24a" stroke-width="1.5" marker-end="url(#arr)" />
+
+          <!-- 2. NORMALIZE -->
+          <g transform="translate(240, 70)">
+            <rect width="160" height="120" fill="#131316" stroke="#2e2e34" stroke-width="1" rx="3" />
+            <text x="14" y="26" fill="#c4f24a" font-family="JetBrains Mono, monospace" font-size="9" letter-spacing="2">02 · STAGE</text>
+            <text x="14" y="58" fill="#ece7da" font-family="Fraunces, serif" font-size="22" font-weight="400">Normalize</text>
+            <text x="14" y="80" fill="#7a7468" font-family="JetBrains Mono, monospace" font-size="10">DataTable</text>
+            <text x="14" y="95" fill="#7a7468" font-family="JetBrains Mono, monospace" font-size="10">→ DuckDB</text>
+            <text x="14" y="110" fill="#4a463e" font-family="JetBrains Mono, monospace" font-size="9">virtual tables</text>
+          </g>
+          <path d="M 400 130 L 432 130" stroke="#c4f24a" stroke-width="1.5" marker-end="url(#arr)" />
+
+          <!-- 3. TRANSFORM -->
+          <g transform="translate(440, 70)">
+            <rect width="160" height="120" fill="#131316" stroke="#c4f24a" stroke-width="1.2" rx="3" />
+            <text x="14" y="26" fill="#c4f24a" font-family="JetBrains Mono, monospace" font-size="9" letter-spacing="2">03 · STAGE</text>
+            <text x="14" y="58" fill="#ece7da" font-family="Fraunces, serif" font-size="22" font-weight="400" font-style="italic">Transform</text>
+            <text x="14" y="80" fill="#7a7468" font-family="JetBrains Mono, monospace" font-size="10">SQL engine</text>
+            <text x="14" y="95" fill="#7a7468" font-family="JetBrains Mono, monospace" font-size="10">JOINs · CTEs</text>
+            <text x="14" y="110" fill="#4a463e" font-family="JetBrains Mono, monospace" font-size="9">your SQL</text>
+          </g>
+          <path d="M 600 130 L 632 130" stroke="#c4f24a" stroke-width="1.5" marker-end="url(#arr)" />
+
+          <!-- 4. VALIDATE -->
+          <g transform="translate(640, 70)">
+            <rect width="160" height="120" fill="#131316" stroke="#2e2e34" stroke-width="1" rx="3" />
+            <text x="14" y="26" fill="#c4f24a" font-family="JetBrains Mono, monospace" font-size="9" letter-spacing="2">04 · STAGE</text>
+            <text x="14" y="58" fill="#ece7da" font-family="Fraunces, serif" font-size="22" font-weight="400">Validate</text>
+            <text x="14" y="80" fill="#7a7468" font-family="JetBrains Mono, monospace" font-size="10">30 GE-style</text>
+            <text x="14" y="95" fill="#7a7468" font-family="JetBrains Mono, monospace" font-size="10">+ 4 legacy</text>
+            <text x="14" y="110" fill="#4a463e" font-family="JetBrains Mono, monospace" font-size="9">fail · warn</text>
+          </g>
+          <path d="M 800 130 L 832 130" stroke="#c4f24a" stroke-width="1.5" marker-end="url(#arr)" />
+
+          <!-- 5. LOAD -->
+          <g transform="translate(840, 70)">
+            <rect width="160" height="120" fill="#131316" stroke="#2e2e34" stroke-width="1" rx="3" />
+            <text x="14" y="26" fill="#c4f24a" font-family="JetBrains Mono, monospace" font-size="9" letter-spacing="2">05 · STAGE</text>
+            <text x="14" y="58" fill="#ece7da" font-family="Fraunces, serif" font-size="22" font-weight="400">Load</text>
+            <text x="14" y="80" fill="#7a7468" font-family="JetBrains Mono, monospace" font-size="10">10 targets</text>
+            <text x="14" y="95" fill="#7a7468" font-family="JetBrains Mono, monospace" font-size="10">DB · file · S3</text>
+            <text x="14" y="110" fill="#4a463e" font-family="JetBrains Mono, monospace" font-size="9">loaders</text>
+          </g>
+
+          <!-- Bottom annotations -->
+          <text x="120" y="240" fill="#4a463e" font-family="JetBrains Mono, monospace" font-size="10">connector layer</text>
+          <text x="320" y="240" fill="#4a463e" font-family="JetBrains Mono, monospace" font-size="10">normalize/</text>
+          <text x="520" y="240" fill="#c4f24a" font-family="JetBrains Mono, monospace" font-size="10">transform.ts</text>
+          <text x="720" y="240" fill="#4a463e" font-family="JetBrains Mono, monospace" font-size="10">validation/</text>
+          <text x="920" y="240" fill="#4a463e" font-family="JetBrains Mono, monospace" font-size="10">loader/</text>
+
+          <text x="40" y="270" fill="#7a7468" font-family="JetBrains Mono, monospace" font-size="9" letter-spacing="2">FIG. 1 — DATA FLOW THROUGH A CONDUIT PIPELINE</text>
+        </svg>
+      </div>
+
+      <h3>The normalize step</h3>
+      <p>
+        Every connector produces a <code>DataTable</code> — plain JS objects with column
+        metadata. The normalize step writes each table to a temp CSV, uses DuckDB's
+        <code>read_csv</code> with auto-detect to infer types, and registers it as an
+        in-memory DuckDB table. From that point on, transform and validation see a
+        single, consistent SQL surface.
+      </p>
+      <p>
+        When new source connectors are added later (PostgreSQL, MongoDB, etc.), they
+        only need to produce a <code>DataTable</code>. The normalize step does the rest.
+      </p>
+    </section>
+
+    <!-- INSTALL ──────────────────────────────────────────────────────── -->
+    <section id="install">
+      <h2><span class="ord">04</span>Install</h2>
+      <div class="section-rule"></div>
+
+      <p>
+        Conduit is distributed via <a class="inline" href="https://jsr.io/@conduit/etl">JSR</a>.
+        One install command works on macOS (Intel + Apple Silicon), Linux, and Windows.
+      </p>
+
+      <h4>Prerequisite</h4>
+<pre class="shell"><code><span class="tk-cmd">curl</span> -fsSL https://deno.land/install.sh | <span class="tk-cmd">sh</span></code></pre>
+
+      <h4>Install the CLI globally</h4>
+<pre class="shell"><code><span class="tk-cmd">deno install</span> <span class="tk-flag">-Agf</span> <span class="tk-flag">-n</span> conduit jsr:@conduit/etl/cli</code></pre>
+
+      <p style="font-size: 0.92rem; color: var(--ink-2);">
+        Flags: <code>-A</code> all permissions (required for DuckDB + database drivers),
+        <code>-g</code> install globally, <code>-f</code> force overwrite,
+        <code>-n conduit</code> name the binary <code>conduit</code>.
+      </p>
+
+      <h4>Verify</h4>
+<pre class="shell"><code>conduit version</code></pre>
+
+      <h4>Update / uninstall</h4>
+<pre class="shell"><code><span class="tk-com"># pull latest from JSR</span>
+<span class="tk-cmd">deno install</span> <span class="tk-flag">-Agf</span> <span class="tk-flag">-n</span> conduit jsr:@conduit/etl/cli
+
+<span class="tk-com"># remove</span>
+<span class="tk-cmd">deno uninstall</span> conduit</code></pre>
+    </section>
+
+    <!-- QUICKSTART ───────────────────────────────────────────────────── -->
+    <section id="quickstart">
+      <h2><span class="ord">05</span>Quick start</h2>
+      <div class="section-rule"></div>
+
+      <ol class="steps">
+        <li>
+          <h4>Initialize a project</h4>
+          <p>Scaffold a sample <code>pipeline.yaml</code> and the <code>.conduit/</code> working directory.</p>
+<pre class="shell"><code>conduit init</code></pre>
+        </li>
+        <li>
+          <h4>Edit your pipeline</h4>
+          <p>Open <code>pipeline.yaml</code> and define your sources, transform SQL, validation checks, and destinations. (See the full example below.)</p>
+        </li>
+        <li>
+          <h4>Run it</h4>
+<pre class="shell"><code><span class="tk-com"># execute the full pipeline</span>
+conduit run pipeline.yaml
+
+<span class="tk-com"># validate without loading</span>
+conduit run pipeline.yaml <span class="tk-flag">--dry-run</span>
+
+<span class="tk-com"># run validation suite only</span>
+conduit validate pipeline.yaml</code></pre>
+        </li>
+        <li>
+          <h4>Read the report</h4>
+          <p>Validation results land in <code>.conduit/reports/</code> as timestamped JSON. Failures with <code>on_failure: fail</code> abort the load; <code>warn</code> logs and continues.</p>
+        </li>
+      </ol>
+
+      <h3>Use as a library</h3>
+<pre class="ts"><code><span class="tk-kw">import</span> { runPipeline, loadPipeline } <span class="tk-kw">from</span> <span class="tk-str">"jsr:@conduit/etl"</span>;
+
+<span class="tk-kw">await</span> <span class="tk-fn">runPipeline</span>(<span class="tk-str">"pipeline.yaml"</span>);</code></pre>
+    </section>
+
+    <!-- PIPELINE YAML ────────────────────────────────────────────────── -->
+    <section id="pipeline">
+      <h2><span class="ord">06</span>Pipeline YAML</h2>
+      <div class="section-rule"></div>
+
+      <p>A pipeline is one declarative file. Here's a complete working example with two sources, a transform, mixed legacy + GE-style validation, and a CSV destination:</p>
+
+<pre class="yaml"><code><span class="tk-key">pipeline</span>:
+  <span class="tk-key">name</span>: <span class="tk-str">orders_enriched</span>
+
+<span class="tk-key">sources</span>:
+  - <span class="tk-key">name</span>: <span class="tk-str">orders</span>
+    <span class="tk-key">type</span>: <span class="tk-str">csv</span>
+    <span class="tk-key">config</span>:
+      <span class="tk-key">path</span>: <span class="tk-str">data/orders.csv</span>
+
+  - <span class="tk-key">name</span>: <span class="tk-str">regions</span>
+    <span class="tk-key">type</span>: <span class="tk-str">csv</span>
+    <span class="tk-key">config</span>:
+      <span class="tk-key">path</span>: <span class="tk-str">data/regions.csv</span>
+
+<span class="tk-key">transform</span>:
+  <span class="tk-key">sql</span>: |
+    <span class="tk-kw">SELECT</span> o.order_id, o.customer_id, o.amount, o.status, r.region
+    <span class="tk-kw">FROM</span> orders o
+    <span class="tk-kw">JOIN</span> regions r <span class="tk-kw">ON</span> o.region_id = r.id
+    <span class="tk-kw">WHERE</span> o.status = <span class="tk-str">'active'</span>
+
+<span class="tk-key">validation</span>:
+  <span class="tk-com"># Legacy schema check</span>
+  - <span class="tk-key">type</span>: <span class="tk-str">schema</span>
+    <span class="tk-key">columns</span>:
+      - { <span class="tk-key">name</span>: <span class="tk-str">order_id</span>, <span class="tk-key">type</span>: <span class="tk-str">INTEGER</span> }
+      - { <span class="tk-key">name</span>: <span class="tk-str">amount</span>,   <span class="tk-key">type</span>: <span class="tk-str">DECIMAL</span> }
+    <span class="tk-key">on_failure</span>: <span class="tk-str">fail</span>
+
+  <span class="tk-com"># GE-style: at least 95% of statuses must be in this set</span>
+  - <span class="tk-key">expectation_type</span>: <span class="tk-str">expect_column_values_to_be_in_set</span>
+    <span class="tk-key">kwargs</span>:
+      <span class="tk-key">column</span>: <span class="tk-str">status</span>
+      <span class="tk-key">value_set</span>: [<span class="tk-str">active</span>, <span class="tk-str">completed</span>, <span class="tk-str">cancelled</span>]
+      <span class="tk-key">mostly</span>: <span class="tk-num">0.95</span>
+    <span class="tk-key">on_failure</span>: <span class="tk-str">fail</span>
+
+  <span class="tk-com"># GE-style: row count sanity</span>
+  - <span class="tk-key">expectation_type</span>: <span class="tk-str">expect_table_row_count_to_be_between</span>
+    <span class="tk-key">kwargs</span>:
+      <span class="tk-key">min_value</span>: <span class="tk-num">1</span>
+      <span class="tk-key">max_value</span>: <span class="tk-num">10000000</span>
+    <span class="tk-key">on_failure</span>: <span class="tk-str">warn</span>
+
+<span class="tk-key">destinations</span>:
+  - <span class="tk-key">name</span>: <span class="tk-str">output</span>
+    <span class="tk-key">type</span>: <span class="tk-str">csv</span>
+    <span class="tk-key">mode</span>: <span class="tk-str">full_refresh</span>
+    <span class="tk-key">config</span>:
+      <span class="tk-key">path</span>: <span class="tk-str">output/result.csv</span></code></pre>
+
+      <div class="callout">
+        <strong>Tip — </strong>
+        Both legacy <code>type:</code> checks and GE-style <code>expectation_type:</code>
+        checks can be mixed in the same <code>validation:</code> block. Each check
+        independently sets <code>on_failure: fail</code> or <code>warn</code>.
+      </div>
+    </section>
+
+    <!-- CLI REFERENCE ────────────────────────────────────────────────── -->
+    <section id="cli">
+      <h2><span class="ord">07</span>CLI reference</h2>
+      <div class="section-rule"></div>
+
+      <p style="color: var(--ink-2); font-size: 0.95rem;">
+        <span class="badge badge-done">Done</span> shipped & tested ·
+        <span class="badge badge-planned">Planned</span> on the roadmap (see <code>PLAN.md</code>)
+      </p>
+
+      <table class="data-table">
+        <thead>
+          <tr><th>Command</th><th>Description</th><th>Status</th></tr>
+        </thead>
+        <tbody>
+          <tr class="section-row"><td colspan="3">General</td></tr>
+          <tr><td><code>conduit version</code></td><td>Show Conduit version + component versions</td><td><span class="badge badge-done">Done</span></td></tr>
+          <tr><td><code>conduit init</code></td><td>Initialize a project (creates <code>.conduit/</code> and sample <code>pipeline.yaml</code>)</td><td><span class="badge badge-done">Done</span></td></tr>
+          <tr><td><code>conduit up</code></td><td>Start daemon, scheduler, API server, and web UI</td><td><span class="badge badge-done">Done</span></td></tr>
+          <tr><td><code>conduit down</code></td><td>Stop everything</td><td><span class="badge badge-done">Done</span></td></tr>
+          <tr><td><code>conduit status</code></td><td>Show running state and connections</td><td><span class="badge badge-done">Done</span></td></tr>
+
+          <tr class="section-row"><td colspan="3">Running</td></tr>
+          <tr><td><code>conduit run &lt;pipeline.yaml&gt;</code></td><td>Execute the full pipeline</td><td><span class="badge badge-done">Done</span></td></tr>
+          <tr><td><code>conduit run &lt;pipeline.yaml&gt; --dry-run</code></td><td>Validate without loading</td><td><span class="badge badge-done">Done</span></td></tr>
+          <tr><td><code>conduit validate &lt;pipeline.yaml&gt;</code></td><td>Run validation suite only</td><td><span class="badge badge-done">Done</span></td></tr>
+          <tr><td><code>conduit run &lt;pipeline.yaml&gt; --restart</code></td><td>Ignore checkpoint, start fresh</td><td><span class="badge badge-planned">Planned</span></td></tr>
+          <tr><td><code>conduit query "SELECT …"</code></td><td>Run an ad-hoc query against a connector</td><td><span class="badge badge-planned">Planned</span></td></tr>
+
+          <tr class="section-row"><td colspan="3">Source connectors</td></tr>
+          <tr><td><code>conduit source add &lt;name&gt;</code></td><td>Add and enable a source connector module</td><td><span class="badge badge-done">Done</span></td></tr>
+          <tr><td><code>conduit source rm &lt;name&gt;</code></td><td>Remove a source connector module</td><td><span class="badge badge-done">Done</span></td></tr>
+          <tr><td><code>conduit source enable / disable &lt;name&gt;</code></td><td>Toggle without removing</td><td><span class="badge badge-done">Done</span></td></tr>
+          <tr><td><code>conduit source list</code></td><td>List all source connectors</td><td><span class="badge badge-done">Done</span></td></tr>
+
+          <tr class="section-row"><td colspan="3">Destination connectors</td></tr>
+          <tr><td><code>conduit destination add &lt;name&gt;</code></td><td>Add and enable a destination connector</td><td><span class="badge badge-done">Done</span></td></tr>
+          <tr><td><code>conduit destination rm &lt;name&gt;</code></td><td>Remove a destination connector</td><td><span class="badge badge-done">Done</span></td></tr>
+          <tr><td><code>conduit destination enable / disable &lt;name&gt;</code></td><td>Toggle without removing</td><td><span class="badge badge-done">Done</span></td></tr>
+          <tr><td><code>conduit destination list</code></td><td>List all destination connectors</td><td><span class="badge badge-done">Done</span></td></tr>
+
+          <tr class="section-row"><td colspan="3">Scheduling</td></tr>
+          <tr><td><code>conduit schedule … --cron "…"</code></td><td>Schedule with a cron expression</td><td><span class="badge badge-planned">Planned</span></td></tr>
+          <tr><td><code>conduit schedule … --every 1h</code></td><td>Schedule by interval</td><td><span class="badge badge-planned">Planned</span></td></tr>
+          <tr><td><code>conduit pipeline list / status / pause / resume / trigger</code></td><td>Manage scheduled pipelines</td><td><span class="badge badge-planned">Planned</span></td></tr>
+
+          <tr class="section-row"><td colspan="3">Reporting · Vault · Time Machine · Checkpoints</td></tr>
+          <tr><td><code>conduit report list / open</code></td><td>Browse generated quality reports</td><td><span class="badge badge-planned">Planned</span></td></tr>
+          <tr><td><code>conduit vault add / list / get / delete</code></td><td>Encrypted secret store</td><td><span class="badge badge-planned">Planned</span></td></tr>
+          <tr><td><code>conduit lock / unlock / drift &lt;pipeline&gt;</code></td><td>Schema-lock management</td><td><span class="badge badge-planned">Planned</span></td></tr>
+          <tr><td><code>conduit history / revert &lt;pipeline&gt;</code></td><td>Config version management</td><td><span class="badge badge-planned">Planned</span></td></tr>
+          <tr><td><code>conduit resume &lt;pipeline&gt;</code></td><td>Resume a failed pipeline from checkpoint</td><td><span class="badge badge-planned">Planned</span></td></tr>
+          <tr><td><code>conduit checkpoint status / clean</code></td><td>Checkpoint management</td><td><span class="badge badge-planned">Planned</span></td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- VALIDATION CATALOG ──────────────────────────────────────────── -->
+    <section id="validation">
+      <h2><span class="ord">08</span>Validation catalog</h2>
+      <div class="section-rule"></div>
+
+      <p>
+        Conduit ships with <strong>30 GE-style expectations</strong> plus 4 legacy check
+        types. All run on the transformed result via DuckDB SQL. Column-map expectations
+        support a <code>mostly</code> threshold (0.0 – 1.0) for partial-pass behavior.
+      </p>
+
+      <!-- Legacy -->
+      <div class="cat-group">
+        <div class="cat-head">
+          <h3>Legacy checks</h3>
+          <span class="cat-count">·4</span>
+          <span class="cat-meta">original format</span>
+        </div>
+        <ul class="exp-list">
+          <li><code>schema</code><span>Verify output columns match expected names and types</span></li>
+          <li><code>null_check</code><span>Assert specified columns contain no nulls</span></li>
+          <li><code>row_count</code><span>Catch empty result sets or unexpected row counts</span></li>
+          <li><code>custom</code><span>Arbitrary SQL assertion — rows returned mean failures</span></li>
+        </ul>
+      </div>
+
+      <!-- Table-level -->
+      <div class="cat-group">
+        <div class="cat-head">
+          <h3>Table-level</h3>
+          <span class="cat-count">·6</span>
+        </div>
+        <ul class="exp-list">
+          <li><code>expect_table_row_count_to_equal</code><span>Row count equals a specific value</span></li>
+          <li><code>expect_table_row_count_to_be_between</code><span>Row count within a min/max range</span></li>
+          <li><code>expect_table_column_count_to_equal</code><span>Number of columns equals a specific value</span></li>
+          <li><code>expect_table_column_count_to_be_between</code><span>Number of columns within a range</span></li>
+          <li><code>expect_table_columns_to_match_ordered_list</code><span>Columns match an exact ordered list</span></li>
+          <li><code>expect_table_columns_to_match_set</code><span>Columns match a set, order-independent</span></li>
+        </ul>
+      </div>
+
+      <!-- Column existence and type -->
+      <div class="cat-group">
+        <div class="cat-head">
+          <h3>Column existence &amp; type</h3>
+          <span class="cat-count">·3</span>
+        </div>
+        <ul class="exp-list">
+          <li><code>expect_column_to_exist</code><span>Column exists in the table</span></li>
+          <li><code>expect_column_values_to_be_of_type</code><span>Column has a specific DuckDB type</span></li>
+          <li><code>expect_column_values_to_be_in_type_list</code><span>Column type is one of a list</span></li>
+        </ul>
+      </div>
+
+      <!-- Completeness -->
+      <div class="cat-group">
+        <div class="cat-head">
+          <h3>Completeness</h3>
+          <span class="cat-count">·2</span>
+          <span class="cat-meta">supports <code>mostly</code></span>
+        </div>
+        <ul class="exp-list">
+          <li><code>expect_column_values_to_not_be_null</code><span>No null values, or within a <code>mostly</code> threshold</span></li>
+          <li><code>expect_column_values_to_be_null</code><span>All values are null</span></li>
+        </ul>
+      </div>
+
+      <!-- Set membership -->
+      <div class="cat-group">
+        <div class="cat-head">
+          <h3>Set membership</h3>
+          <span class="cat-count">·4</span>
+          <span class="cat-meta">supports <code>mostly</code></span>
+        </div>
+        <ul class="exp-list">
+          <li><code>expect_column_values_to_be_in_set</code><span>Each value is in a given set</span></li>
+          <li><code>expect_column_values_to_not_be_in_set</code><span>No value is in a given set</span></li>
+          <li><code>expect_column_distinct_values_to_equal_set</code><span>Distinct values exactly match a set</span></li>
+          <li><code>expect_column_distinct_values_to_contain_set</code><span>Distinct values contain a required set</span></li>
+        </ul>
+      </div>
+
+      <!-- Numeric -->
+      <div class="cat-group">
+        <div class="cat-head">
+          <h3>Numeric</h3>
+          <span class="cat-count">·3</span>
+          <span class="cat-meta">supports <code>mostly</code></span>
+        </div>
+        <ul class="exp-list">
+          <li><code>expect_column_values_to_be_between</code><span>Each value within min/max (optional <code>strict_min</code> / <code>strict_max</code>)</span></li>
+          <li><code>expect_column_values_to_be_increasing</code><span>Values are monotonically increasing</span></li>
+          <li><code>expect_column_values_to_be_decreasing</code><span>Values are monotonically decreasing</span></li>
+        </ul>
+      </div>
+
+      <!-- Uniqueness -->
+      <div class="cat-group">
+        <div class="cat-head">
+          <h3>Uniqueness</h3>
+          <span class="cat-count">·1</span>
+          <span class="cat-meta">supports <code>mostly</code></span>
+        </div>
+        <ul class="exp-list">
+          <li><code>expect_column_values_to_be_unique</code><span>All values are unique — no duplicates</span></li>
+        </ul>
+      </div>
+
+      <!-- String -->
+      <div class="cat-group">
+        <div class="cat-head">
+          <h3>String pattern &amp; length</h3>
+          <span class="cat-count">·4</span>
+          <span class="cat-meta">supports <code>mostly</code></span>
+        </div>
+        <ul class="exp-list">
+          <li><code>expect_column_values_to_match_regex</code><span>Each value matches a regex pattern</span></li>
+          <li><code>expect_column_values_to_not_match_regex</code><span>No value matches a regex pattern</span></li>
+          <li><code>expect_column_value_lengths_to_equal</code><span>String length equals a specific value</span></li>
+          <li><code>expect_column_value_lengths_to_be_between</code><span>String length within a range</span></li>
+        </ul>
+      </div>
+
+      <!-- Aggregate -->
+      <div class="cat-group">
+        <div class="cat-head">
+          <h3>Aggregate statistics</h3>
+          <span class="cat-count">·7</span>
+        </div>
+        <ul class="exp-list">
+          <li><code>expect_column_min_to_be_between</code><span>Column minimum within a range</span></li>
+          <li><code>expect_column_max_to_be_between</code><span>Column maximum within a range</span></li>
+          <li><code>expect_column_mean_to_be_between</code><span>Column mean within a range</span></li>
+          <li><code>expect_column_median_to_be_between</code><span>Column median within a range</span></li>
+          <li><code>expect_column_stdev_to_be_between</code><span>Standard deviation within a range</span></li>
+          <li><code>expect_column_sum_to_be_between</code><span>Column sum within a range</span></li>
+          <li><code>expect_column_unique_value_count_to_be_between</code><span>Distinct value count within a range</span></li>
+        </ul>
+      </div>
+
+      <h3>The <em>mostly</em> parameter</h3>
+      <p>Column-map expectations accept a <code>mostly</code> field between 0.0 and 1.0 — the proportion of non-null values that must pass. <code>mostly: 0.95</code> means up to 5 % unexpected values are tolerated:</p>
+<pre class="yaml"><code>- <span class="tk-key">expectation_type</span>: <span class="tk-str">expect_column_values_to_not_be_null</span>
+  <span class="tk-key">kwargs</span>:
+    <span class="tk-key">column</span>: <span class="tk-str">email</span>
+    <span class="tk-key">mostly</span>: <span class="tk-num">0.95</span>
+  <span class="tk-key">on_failure</span>: <span class="tk-str">fail</span></code></pre>
+
+      <h3>Result format</h3>
+      <p>Every expectation returns rich diagnostics in the JSON report: <code>element_count</code>, <code>unexpected_count</code>, <code>unexpected_percent</code>, <code>missing_count</code> / <code>missing_percent</code>, a <code>partial_unexpected_list</code> sample of up to 20 failing values, and an <code>observed_value</code> summary.</p>
+    </section>
+
+    <!-- DESTINATIONS ─────────────────────────────────────────────────── -->
+    <section id="destinations">
+      <h2><span class="ord">09</span>Destinations</h2>
+      <div class="section-rule"></div>
+
+      <p>Ten loader implementations ship in-tree. All are driven by the same loader interface — register a connector, point at credentials, write to it.</p>
+
+      <div class="dest-grid">
+        <div class="dest-chip"><span>csv</span><span class="dot"></span></div>
+        <div class="dest-chip"><span>json</span><span class="dot"></span></div>
+        <div class="dest-chip"><span>jsonl</span><span class="dot"></span></div>
+        <div class="dest-chip"><span>parquet</span><span class="dot"></span></div>
+        <div class="dest-chip"><span>postgres</span><span class="dot"></span></div>
+        <div class="dest-chip"><span>mysql</span><span class="dot"></span></div>
+        <div class="dest-chip"><span>snowflake</span><span class="dot"></span></div>
+        <div class="dest-chip"><span>bigquery</span><span class="dot"></span></div>
+        <div class="dest-chip"><span>mongodb</span><span class="dot"></span></div>
+        <div class="dest-chip"><span>s3</span><span class="dot"></span></div>
+      </div>
+
+      <p style="color: var(--ink-2); font-size: 0.95rem;">
+        Configure each destination's <code>mode</code> (<code>full_refresh</code> /
+        <code>incremental</code>), <code>batch_size</code>, optional merge keys for
+        incremental loads, and connection details inline in <code>pipeline.yaml</code> or
+        via the <code>connection:</code> field referencing the secret vault.
+      </p>
+
+      <h3>The <code>.conduit/</code> directory</h3>
+      <p>Every project has a <code>.conduit/</code> working directory created by <code>conduit init</code>. It holds:</p>
+      <ul style="color: var(--ink-2); padding-left: 1.2rem;">
+        <li><code>checkpoints/</code> — pipeline checkpoint state</li>
+        <li><code>logs/</code> — execution logs</li>
+        <li><code>reports/</code> — JSON validation reports, one per run</li>
+        <li><code>scheduler/</code> — daemon state when <code>conduit up</code> is running</li>
+      </ul>
+    </section>
+
+    <!-- FOOTER ───────────────────────────────────────────────────────── -->
+    <footer class="footer">
+      <div>
+        <div class="footer-mark">conduit/etl</div>
+        <div class="footer-meta">
+          A local-first ELT workbench.<br />
+          <strong>v0.1.0</strong> — alpha · MIT License<br />
+          Built on Deno · TypeScript · DuckDB · Zod
+        </div>
+      </div>
+
+      <div class="footer-cols">
+        <div class="footer-col">
+          <h5>Project</h5>
+          <a href="https://jsr.io/@conduit/etl">JSR package</a>
+          <a href="https://github.com/mdraju/conduit-ETL">GitHub</a>
+          <a href="#install">Install</a>
+        </div>
+        <div class="footer-col">
+          <h5>Read</h5>
+          <a href="#overview">Overview</a>
+          <a href="#architecture">Architecture</a>
+          <a href="#pipeline">Pipeline YAML</a>
+        </div>
+        <div class="footer-col">
+          <h5>Reference</h5>
+          <a href="#cli">CLI commands</a>
+          <a href="#validation">Validators</a>
+          <a href="#destinations">Destinations</a>
+        </div>
+      </div>
+    </footer>
+
+  </main>
+</div>
+
+<script>
+  // ─── Scroll-spy: highlight the active sidebar link ───────────────────
+  (function () {
+    const links = document.querySelectorAll('#toc a');
+    const map = new Map();
+    links.forEach((a) => {
+      const id = a.getAttribute('href').slice(1);
+      const target = document.getElementById(id);
+      if (target) map.set(target, a);
+    });
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          const link = map.get(entry.target);
+          if (!link) return;
+          if (entry.isIntersecting) {
+            links.forEach((l) => l.classList.remove('active'));
+            link.classList.add('active');
+          }
+        });
+      },
+      { rootMargin: '-30% 0px -60% 0px', threshold: 0 }
+    );
+
+    map.forEach((_, target) => observer.observe(target));
+  })();
+</script>
+
+</body>
+</html>

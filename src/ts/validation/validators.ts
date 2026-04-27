@@ -138,10 +138,11 @@ export function validateNullCheck(
   const names = check.columns.map((c) =>
     typeof c === "string" ? c : c.name
   );
+  const scope = names.length > 0 ? names.join(", ") : "all columns";
   return {
     checkType: "null_check",
     status: "pass",
-    message: `Null check passed: no nulls in ${names.join(", ")}`,
+    message: `Null check passed: no nulls in ${scope}`,
     timestamp: new Date(),
   };
 }
@@ -172,10 +173,17 @@ export function validateRowCount(
     };
   }
 
+  const rangeText = minRows !== null && maxRows !== null
+    ? `${minRows}-${maxRows}`
+    : minRows !== null
+    ? `>=${minRows}`
+    : maxRows !== null
+    ? `<=${maxRows}`
+    : "unbounded";
   return {
     checkType: "row_count",
     status: "pass",
-    message: `Row count check passed: ${actual} rows (range: ${minRows}-${maxRows})`,
+    message: `Row count check passed: ${actual} rows (range: ${rangeText})`,
     details: { actual, min: minRows, max: maxRows },
     timestamp: new Date(),
   };
